@@ -1,45 +1,30 @@
-#include <SPI.h>
-#include <MFRC522.h>
 #include <Servo.h>
 #include <Vector.h>
 
-#define SS_PIN 10
-#define RST_PIN 9
-
-// Declarando o rfid
-MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 // Declarando o Servo
 Servo servo1;
 Servo servo2;
 
-// Cria a chave de autenticação
-MFRC522::MIFARE_Key key;
 
 // Configuração do Vector
 const int TIPO_MAX_ITENS = 10;
 String armazenamentoLista[TIPO_MAX_ITENS]; 
 Vector<String> listaEsteira(armazenamentoLista);
 
-// Declaração prévia
-bool autenticacao(int bloco);
-void escrever_dados(int bloco, String texto); 
-void ler_dados(int bloco);
 void acaoLeitura(String dadosCard);
 void andamento_esteira();
 
-// variáveis
-int modo = 0; // 0 = leitura; 1 = gravação
 int servoAnguloInicial = 90;
 int servoAnguloFinal = -90;
 
-// portas 
-int buzzer = 8;
+// Portas
 int pinServo1 = 6;
 int pinServo2 = 5;
 int pinMotor = 7;
 int pinTrig = A0;
 int pinEcho = A1;
+int pinDados = 5;
 
 // Blocos
 int blocoTipo = 2; 
@@ -48,7 +33,6 @@ int blocoDestino = 1;
 void setup() {
   Serial.begin(115200);
   SPI.begin();
-  mfrc522.PCD_Init();
 
   pinMode(buzzer, OUTPUT);
   pinMode(pinMotor, OUTPUT);
@@ -61,10 +45,6 @@ void setup() {
   servo1.write(servoAnguloInicial); 
   servo2.write(servoAnguloInicial);
 
-  for (byte i = 0; i < 6; i++) {
-    key.keyByte[i] = 0xFF;
-  }
-  
   Serial.println(F("Sistema iniciado."));
 
   tone(buzzer, 1000);
@@ -77,41 +57,13 @@ void setup() {
 }
 
 void loop() {
-  if (modo == 1) {
-    Serial.println(F("\n--- MODO DE GRAVACAO ---"));
-    Serial.println(F("Digite o texto (max 16 caracteres) e pressione Enter:"));
-    
-    while (Serial.available() == 0) {
-      // Aguarda entrada
-    }
-    
-    String textoDigitado = Serial.readStringUntil('\n'); 
-    textoDigitado.trim(); 
-    textoDigitado.toUpperCase(); 
+  int item = analogRead(pinDados);
 
-    Serial.print(F("Texto capturado: "));
-    Serial.println(textoDigitado);
-    Serial.println(F("Aproxime o cartao para gravar..."));
-
-    while (true) {
-      if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-        escrever_dados(blocoTipo, textoDigitado);
-        break; 
-      }
-    }
-  } 
-  else {
-    // Modo de Leitura limpo usando o loop principal do Arduino
-    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-      ler_dados(blocoTipo);
-      
-      mfrc522.PICC_HaltA();
-      mfrc522.PCD_StopCrypto1();
-      delay(1500); 
-    }
+  if (item == 1) {
+    acaoLeitura("P1");
+  } else if (item == 2) {
+    acaoLeitura("P2");
   }
-
-  andamento_esteira();
 }
 
 void acaoLeitura(String dados){
@@ -134,6 +86,7 @@ void andamento_esteira() {
       digitalWrite(pinMotor, LOW);
       return;
   } 
+
 
   // Se tem itens, liga o motor para movimentar a esteira
   digitalWrite(pinMotor, HIGH);
