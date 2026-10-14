@@ -1,110 +1,199 @@
 #include <SPI.h>
-#include <MFRC522.h>
+#include <Adafruit_PN532.h>
 
+// ===== CONFIGURACOES =====
 #define SS_PIN 10
-#define RST_PIN 9
+#define BUZZER 8
 
-// Declarando o rfid
-MFRC522 mfrc522(SS_PIN, RST_PIN);
+// 0 = GRAVAR | 1 = LER
+int funcao = 0;
 
-// Cria a chave de autenticação
-MFRC522::MIFARE_Key key;
+// Bloco de dados do setor 1 (evita o setor 0 e os blocos de trailer 3, 7, 11...)
+uint8_t blocoTipo = 4;
 
+// Chave padrao A do MIFARE Classic
+uint8_t chaveA[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-// Declaração prévia
-bool autenticacao(int bloco);
-void escrever_dados(int bloco, String texto); 
+Adafruit_PN532 nfc(SS_PIN);
 
-// portas 
-int buzzer = 8;
+uint8_t uid[7];
+uint8_t uidLength;
+uint8_t dados[16];
 
-// Blocos
-int blocoTipo = 2; 
-int blocoDestino = 1; 
-
-void setup() {
-  Serial.begin(115200);
-  SPI.begin();
-  mfrc522.PCD_Init();
-
-  pinMode(buzzer, OUTPUT);
-
-  for (byte i = 0; i < 6; i++) {
-    key.keyByte[i] = 0xFF;
-  }
-  
-  Serial.println(F("Sistema iniciado."));
-
-  tone(buzzer, 1000);
-  delay(200);
-  noTone(buzzer);
-  delay(200);
-  tone(buzzer, 1000);
-  delay(200);
-  noTone(buzzer);
+// ===== BUZZER =====
+void bip(int duracao = 150) {
+  digitalWrite(BUZZER, HIGH);
+  delay(duracao);
+  digitalWrite(BUZZER, LOW);
 }
 
-void loop() {
-  
-  Serial.println(F("\n--- MODO DE GRAVACAO ---"));
-  Serial.println(F("Digite o texto (max 16 caracteres) e pressione Enter:"));
-  
-  while (Serial.available() == 0) {
-    // Aguarda entrada
-  }
-  
-  String textoDigitado = Serial.readStringUntil('\n'); 
-  textoDigitado.trim(); 
-  textoDigitado.toUpperCase(); 
+void bipDuplo() {
+  bip(120);
+  delay(100);
+  bip(120);
+}
 
-  Serial.print(F("Texto capturado: "));
-  Serial.println(textoDigitado);
-  Serial.println(F("Aproxime o cartao para gravar..."));
-
-  while (true) {
-    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
-      escrever_dados(blocoTipo, textoDigitado);
-      break; 
-    }
+// Som de erro: 3 bipes curtos e rapidos
+void bipErro() {
+  for (int i = 0; i < 3; i++) {
+    bip(80);
+    delay(80);
   }
 }
 
-bool autenticacao(int bloco){
-  MFRC522::StatusCode status; 
-  status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, bloco, &key, &(mfrc522.uid));
-  if (status != MFRC522::STATUS_OK) {
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
-    return false;    
+// ===== FUNCOES AUXILIARES =====
+
+// Mostra "Aguardando cartao" UMA vez e espera ate detectar
+void esperarCartao() {
+  Serial.println();
+  Serial.println(F("Aguardando cartao..."));
+
+  // Espera ate o cartao ser lido (sem repetir mensagens)
+  while (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 500)) {
+    // fica aqui em silencio
+  }
+
+  Serial.println(F("Cartao detectado!"));
+  bip();  // bip toda vez que um cartao e lido
+}
+
+// Espera o cartao ser retirado antes de continuar
+void esperarRetirada() {
+  Serial.println(F("Retire o cartao..."));
+  delay(300);
+
+  uint8_t uidTmp[7];
+  uint8_t lenTmp;
+
+  while (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uidTmp, &lenTmp, 300)) {
+    delay(100);
+  }
+  delay(300);
+}
+
+bool autenticarBloco() {
+  if (uidLength != 4) {
+    Serial.println(F("Cartao nao e MIFARE Classic (UID de 4 bytes esperado)."));
+    return false;
+  }
+
+  bool sucesso = nfc.mifareclassic_AuthenticateBlock(
+    uid, uidLength, blocoTipo, 0, chaveA
+  );
+
+  if (!sucesso) {
+    Serial.println(F("Falha na autenticacao (chave diferente ou cartao nao e Classic)."));
+    return false;
   }
   return true;
 }
 
-void escrever_dados(int bloco, String texto){
-  byte dadosParaGravar[16] = {0}; 
-  for (int i = 0; i < 16; i++) {
-    if (i < texto.length()) {
-      dadosParaGravar[i] = texto[i];
-    } else {
-      dadosParaGravar[i] = ' ';
-    }
+void mostrarUID() {
+  Serial.print(F("UID: "));
+  for (uint8_t i = 0; i < uidLength; i++) {
+    if (uid[i] < 0x10) Serial.print('0');
+    Serial.print(uid[i], HEX);
+    Serial.print(' ');
   }
+  Serial.println();
+}
 
-  if (!autenticacao(bloco)) return;
+// ===== GRAVACAO =====
+void gravarCartao() {
+  Serial.println();
+  Serial.println(F("Digite o texto (maximo 16 caracteres):"));
 
-  MFRC522::StatusCode status = mfrc522.MIFARE_Write(bloco, dadosParaGravar, 16);
-  if (status != MFRC522::STATUS_OK) {
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
+  while (Serial.available()) Serial.read();
+  while (Serial.available() == 0) { }
+
+  String entrada = Serial.readStringUntil('\n');
+  entrada.trim();
+  entrada.toUpperCase();
+
+  if (entrada.length() == 0) {
+    Serial.println(F("Texto vazio."));
     return;
   }
-  
-  Serial.println(F("Dados gravados com SUCESSO! Retire o cartao."));
-  mfrc522.PICC_HaltA();
-  mfrc522.PCD_StopCrypto1();
+  if (entrada.length() > 16) entrada = entrada.substring(0, 16);
 
-  tone(buzzer, 500);
-  delay(500);
-  noTone(buzzer);
-  delay(1500); 
+  for (uint8_t i = 0; i < 16; i++) {
+    dados[i] = (i < entrada.length()) ? entrada[i] : ' ';
+  }
+
+  Serial.print(F("Texto: "));
+  Serial.println(entrada);
+
+  esperarCartao();   // so mostra "Aguardando cartao..." uma vez
+  mostrarUID();
+
+  if (autenticarBloco() && nfc.mifareclassic_WriteDataBlock(blocoTipo, dados)) {
+    Serial.println(F("Cartao cadastrado com sucesso!"));
+    bipDuplo();  // bip ao cadastrar
+  } else {
+    Serial.println(F("Erro ao gravar o cartao."));
+    bipErro();
+  }
+
+  esperarRetirada();
+}
+
+// ===== LEITURA =====
+void lerCartao() {
+  esperarCartao();
+  mostrarUID();
+
+  memset(dados, 0, sizeof(dados));
+
+  if (autenticarBloco() && nfc.mifareclassic_ReadDataBlock(blocoTipo, dados)) {
+    Serial.print(F("Texto lido: "));
+    for (uint8_t i = 0; i < 16; i++) Serial.write(dados[i]);
+    Serial.println();
+    bipDuplo();
+  } else {
+    Serial.println(F("Erro ao ler o cartao."));
+    bipErro();
+  }
+
+  esperarRetirada();
+}
+
+// ===== INICIALIZACAO =====
+void setup() {
+  Serial.begin(9600);
+  Serial.setTimeout(30000);
+
+  pinMode(BUZZER, OUTPUT);
+  digitalWrite(BUZZER, LOW);
+
+  Serial.println();
+  Serial.println(F("Iniciando PN532..."));
+
+  nfc.begin();
+
+  uint32_t versao = nfc.getFirmwareVersion();
+  if (!versao) {
+    Serial.println(F("ERRO: PN532 nao encontrado."));
+    Serial.println(F("Verifique a ligacao SPI e as chaves DIP (SEL0=OFF, SEL1=ON)."));
+    bipErro();
+    while (true) delay(1000);
+  }
+
+  Serial.print(F("Firmware PN5"));
+  Serial.print((versao >> 24) & 0xFF, HEX);
+  Serial.print(F(" v"));
+  Serial.print((versao >> 16) & 0xFF);
+  Serial.print('.');
+  Serial.println((versao >> 8) & 0xFF);
+
+  nfc.SAMConfig();
+  nfc.setPassiveActivationRetries(0xFF);
+
+  Serial.println(F("PN532 iniciado com sucesso!"));
+  Serial.println(funcao == 0 ? F("MODO: GRAVACAO") : F("MODO: LEITURA"));
+  bip(100);
+}
+
+void loop() {
+  if (funcao == 0) gravarCartao();
+  else lerCartao();
 }
