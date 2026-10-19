@@ -20,6 +20,21 @@ uint8_t uid[7];
 uint8_t uidLength;
 uint8_t dados[16];
 
+// ===== SEPARADORES =====
+// Imprime uma linha de 40 caracteres (padrao '-' ou o caractere informado)
+void linha(char c = '-') {
+  for (uint8_t i = 0; i < 40; i++) Serial.print(c);
+  Serial.println();
+}
+
+// Titulo entre duas linhas duplas
+void titulo(const __FlashStringHelper *texto) {
+  Serial.println();
+  linha('=');
+  Serial.println(texto);
+  linha('=');
+}
+
 // ===== BUZZER =====
 void bip(int duracao = 150) {
   digitalWrite(BUZZER, HIGH);
@@ -45,7 +60,6 @@ void bipErro() {
 
 // Mostra "Aguardando cartao" UMA vez e espera ate detectar
 void esperarCartao() {
-  Serial.println();
   Serial.println(F("Aguardando cartao..."));
 
   // Espera ate o cartao ser lido (sem repetir mensagens)
@@ -100,7 +114,8 @@ void mostrarUID() {
 
 // ===== GRAVACAO =====
 void gravarCartao() {
-  Serial.println();
+  titulo(F("NOVA GRAVACAO"));
+
   Serial.println(F("Digite o texto (maximo 16 caracteres):"));
 
   while (Serial.available()) Serial.read();
@@ -122,9 +137,11 @@ void gravarCartao() {
 
   Serial.print(F("Texto: "));
   Serial.println(entrada);
+  linha();
 
   esperarCartao();   // so mostra "Aguardando cartao..." uma vez
   mostrarUID();
+  linha();
 
   if (autenticarBloco() && nfc.mifareclassic_WriteDataBlock(blocoTipo, dados)) {
     Serial.println(F("Cartao cadastrado com sucesso!"));
@@ -133,14 +150,19 @@ void gravarCartao() {
     Serial.println(F("Erro ao gravar o cartao."));
     bipErro();
   }
+  linha();
 
   esperarRetirada();
+  linha('=');
 }
 
 // ===== LEITURA =====
 void lerCartao() {
+  titulo(F("NOVA LEITURA"));
+
   esperarCartao();
   mostrarUID();
+  linha();
 
   memset(dados, 0, sizeof(dados));
 
@@ -153,8 +175,10 @@ void lerCartao() {
     Serial.println(F("Erro ao ler o cartao."));
     bipErro();
   }
+  linha();
 
   esperarRetirada();
+  linha('=');
 }
 
 // ===== INICIALIZACAO =====
@@ -165,8 +189,7 @@ void setup() {
   pinMode(BUZZER, OUTPUT);
   digitalWrite(BUZZER, LOW);
 
-  Serial.println();
-  Serial.println(F("Iniciando PN532..."));
+  titulo(F("INICIANDO PN532"));
 
   nfc.begin();
 
@@ -174,6 +197,7 @@ void setup() {
   if (!versao) {
     Serial.println(F("ERRO: PN532 nao encontrado."));
     Serial.println(F("Verifique a ligacao SPI e as chaves DIP (SEL0=OFF, SEL1=ON)."));
+    linha('=');
     bipErro();
     while (true) delay(1000);
   }
@@ -190,6 +214,7 @@ void setup() {
 
   Serial.println(F("PN532 iniciado com sucesso!"));
   Serial.println(funcao == 0 ? F("MODO: GRAVACAO") : F("MODO: LEITURA"));
+  linha('=');
   bip(100);
 }
 
