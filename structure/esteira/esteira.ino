@@ -1,130 +1,105 @@
-#include <Servo.h>
-#include <Vector.h>
+#include <Stepper.h>
 
+// ===== CONFIGURACOES DO MOTOR =====
+// Motor 28BYJ-48 (5V) com driver ULN2003
+// IN1 = 8 | IN2 = 9 | IN3 = 10 | IN4 = 11
+#define IN1 8
+#define IN2 9
+#define IN3 10
+#define IN4 11
 
-// Declarando o Servo
-Servo servo1;
-Servo servo2;
+// Passos por volta completa do eixo (28BYJ-48 = 2048 no modo full-step)
+const int PASSOS_POR_VOLTA = 2048;
 
+// Velocidade final em RPM.
+// O limite pratico do 28BYJ-48 em 5V e ~15 a 17 RPM.
+// Se quiser testar mais rapido, suba de 1 em 1 (16, 17...).
+// Se o motor so vibrar ou travar, diminua este valor.
+const int VELOCIDADE_RPM = 17;
 
-// Configuração do Vector
-const int TIPO_MAX_ITENS = 10;
-String armazenamentoLista[TIPO_MAX_ITENS]; 
-Vector<String> listaEsteira(armazenamentoLista);
+// Aceleracao gradual: comeca devagar e sobe ate VELOCIDADE_RPM,
+// o que aumenta a chance de o motor aguentar a velocidade alta.
+const int RPM_INICIAL = 6;
+const int PASSOS_POR_AUMENTO = 60;   // a cada N passos sobe 1 RPM
 
-void acaoLeitura(String dadosCard);
-void andamento_esteira();
+// false = depois do primeiro comando gira para sempre
+// true  = cada novo comando "MOTOR" liga/desliga o motor
+const bool ALTERNAR_COM_NOVO_COMANDO = false;
 
-int servoAnguloInicial = 90;
-int servoAnguloFinal = -90;
+// A ordem dos pinos e IN1, IN3, IN2, IN4 para a sequencia correta da bobina
+Stepper motor(PASSOS_POR_VOLTA, IN1, IN3, IN2, IN4);
 
-// Portas
-int pinServo1 = 6;
-int pinServo2 = 5;
-int pinMotor = 7;
-int pinTrig = A0;
-int pinEcho = A1;
-int pinDados = 5;
+bool girando = false;
+int rpmAtual = RPM_INICIAL;
+int contaPassos = 0;
 
-// Blocos
-int blocoTipo = 2; 
-int blocoDestino = 1; 
+// ===== RECEPCAO SERIAL =====
+char buffer[16];
+uint8_t tamanho = 0;
+
+// Desliga as bobinas para o motor e o driver nao esquentarem parado
+void desligarBobinas() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
+
+void tratarComando() {
+  if (!girando) {
+    girando = true;
+    rpmAtual = RPM_INICIAL;      // sempre arranca com a rampa
+    contaPassos = 0;
+    motor.setSpeed(rpmAtual);
+  } else if (ALTERNAR_COM_NOVO_COMANDO) {
+    girando = false;
+    desligarBobinas();
+  }
+}
+
+// Le o Serial sem travar o motor
+void lerSerial() {
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == '\n') {
+      buffer[tamanho] = '\0';
+
+      // Ignora qualquer linha que nao seja exatamente "MOTOR"
+      if (strcmp(buffer, "MOTOR") == 0) {
+        tratarComando();
+      }
+      tamanho = 0;
+    }
+    else if (c != '\r') {
+      if (tamanho < sizeof(buffer) - 1) buffer[tamanho++] = c;
+      else tamanho = 0;  // linha longa demais (texto de debug): descarta
+    }
+  }
+}
 
 void setup() {
-  Serial.begin(115200);
-  SPI.begin();
+  // Mesma velocidade do outro Arduino
+  Serial.begin(9600);
 
-  pinMode(buzzer, OUTPUT);
-  pinMode(pinMotor, OUTPUT);
-  pinMode(pinTrig, OUTPUT);
-  pinMode(pinEcho, INPUT);
-
-  servo1.attach(pinServo1);
-  servo2.attach(pinServo2);
-
-  servo1.write(servoAnguloInicial); 
-  servo2.write(servoAnguloInicial);
-
-  Serial.println(F("Sistema iniciado."));
-
-  tone(buzzer, 1000);
-  delay(200);
-  noTone(buzzer);
-  delay(200);
-  tone(buzzer, 1000);
-  delay(200);
-  noTone(buzzer);
+  motor.setSpeed(RPM_INICIAL);
+  desligarBobinas();
 }
 
 void loop() {
-  int item = analogRead(pinDados);
+  lerSerial();
 
-  if (item == 1) {
-    acaoLeitura("P1");
-  } else if (item == 2) {
-    acaoLeitura("P2");
-  }
-}
+  // Gira um passo por vez para continuar escutando o Serial
+  // OBS: este Arduino NAO imprime nada no Serial, para nao
+  // enviar lixo para o RX do Arduino leitor.
+  if (girando) {
+    motor.step(1);
 
-void acaoLeitura(String dados){
-  String dadosBloco = dados;
-  dadosBloco.trim(); 
-
-  if (!listaEsteira.full()) {
-    listaEsteira.push_back(dadosBloco);
-    Serial.print(F("Produto Lido: ["));
-    Serial.print(listaEsteira.back());
-    Serial.println(F("]"));
-  } else {
-    Serial.println(F("Aviso: Lista da esteira cheia!"));
-  }
-} 
-
-void andamento_esteira() {
-  // Se a lista estiver vazia, desliga o motor e para por aqui
-  if (listaEsteira.empty()) {
-      digitalWrite(pinMotor, LOW);
-      return;
-  } 
-
-
-  // Se tem itens, liga o motor para movimentar a esteira
-  digitalWrite(pinMotor, HIGH);
-
-  // Pega o primeiro item da fila (FIFO)
-  String itemAtual = listaEsteira[0];
-
-  // Leitura do sensor de proximidade (Ultrassônico)
-  digitalWrite(pinTrig, LOW);
-  delayMicroseconds(2);
-  digitalWrite(pinTrig, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(pinTrig, LOW);
-
-  long duracao = pulseIn(pinEcho, HIGH);
-  int distanciaCm = duracao * 0.0343 / 2; // Corrigido para 'distanciaCm'
-
-  // Se o objeto chegar perto do sensor (<= 3 cm)
-  if (distanciaCm > 0 && distanciaCm <= 3) {
-    Serial.print(F("Objeto detectado! Processando: "));
-    Serial.println(itemAtual);
-
-    if (itemAtual == "P1") {
-      digitalWrite(pinMotor, LOW); // Para o motor para o servo atuar
-      servo1.write(servoAnguloFinal);
-      delay(1000);
-      servo1.write(servoAnguloInicial);
-      delay(500);
-    } 
-    else if (itemAtual == "P2") {
-      digitalWrite(pinMotor, LOW);
-      servo2.write(servoAnguloFinal);
-      delay(1000);
-      servo2.write(servoAnguloInicial);
-      delay(500);
+    // Rampa de aceleracao ate a velocidade final
+    if (rpmAtual < VELOCIDADE_RPM && ++contaPassos >= PASSOS_POR_AUMENTO) {
+      contaPassos = 0;
+      rpmAtual++;
+      motor.setSpeed(rpmAtual);
     }
-
-    // Remove o item da lista após ser processado com sucesso
-    listaEsteira.remove(0);
   }
 }
