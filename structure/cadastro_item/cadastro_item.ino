@@ -6,7 +6,7 @@
 #define BUZZER 8
 
 // Pino ligado ao RESET do Arduino do motor
-#define RESET_MOTOR 7
+#define RESET_MOTOR 9
 
 // 0 = GRAVAR | 1 = LER
 int funcao = 1;
