@@ -5,8 +5,11 @@
 #define SS_PIN 10
 #define BUZZER 8
 
+// Pino ligado ao RESET do Arduino do motor
+#define RESET_MOTOR 7
+
 // 0 = GRAVAR | 1 = LER
-int funcao = 0;
+int funcao = 1;
 
 // Bloco de dados do setor 1 (evita o setor 0 e os blocos de trailer 3, 7, 11...)
 uint8_t blocoTipo = 4;
@@ -20,14 +23,28 @@ uint8_t uid[7];
 uint8_t uidLength;
 uint8_t dados[16];
 
+// ===== RESET DO ARDUINO DO MOTOR =====
+// Puxa o RESET do outro Arduino para LOW por 100 ms e depois solta.
+void resetarArduinoMotor() {
+  digitalWrite(RESET_MOTOR, LOW);
+  pinMode(RESET_MOTOR, OUTPUT);
+  delay(100);
+  pinMode(RESET_MOTOR, INPUT);      // solta o reset
+}
+
+// ===== COMUNICACAO COM O ARDUINO DO MOTOR =====
+// Envia o comando "MOTOR" pelo TX (pino 1) para o RX (pino 0) do outro Arduino
+void enviarComandoMotor() {
+  Serial.println(F("MOTOR"));
+  Serial.println(F("Comando enviado ao motor."));
+}
+
 // ===== SEPARADORES =====
-// Imprime uma linha de 40 caracteres (padrao '-' ou o caractere informado)
 void linha(char c = '-') {
   for (uint8_t i = 0; i < 40; i++) Serial.print(c);
   Serial.println();
 }
 
-// Titulo entre duas linhas duplas
 void titulo(const __FlashStringHelper *texto) {
   Serial.println();
   linha('=');
@@ -57,21 +74,17 @@ void bipErro() {
 }
 
 // ===== FUNCOES AUXILIARES =====
-
-// Mostra "Aguardando cartao" UMA vez e espera ate detectar
 void esperarCartao() {
   Serial.println(F("Aguardando cartao..."));
 
-  // Espera ate o cartao ser lido (sem repetir mensagens)
   while (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 500)) {
     // fica aqui em silencio
   }
 
   Serial.println(F("Cartao detectado!"));
-  bip();  // bip toda vez que um cartao e lido
+  bip();
 }
 
-// Espera o cartao ser retirado antes de continuar
 void esperarRetirada() {
   Serial.println(F("Retire o cartao..."));
   delay(300);
@@ -139,13 +152,13 @@ void gravarCartao() {
   Serial.println(entrada);
   linha();
 
-  esperarCartao();   // so mostra "Aguardando cartao..." uma vez
+  esperarCartao();
   mostrarUID();
   linha();
 
   if (autenticarBloco() && nfc.mifareclassic_WriteDataBlock(blocoTipo, dados)) {
     Serial.println(F("Cartao cadastrado com sucesso!"));
-    bipDuplo();  // bip ao cadastrar
+    bipDuplo();
   } else {
     Serial.println(F("Erro ao gravar o cartao."));
     bipErro();
@@ -171,6 +184,7 @@ void lerCartao() {
     for (uint8_t i = 0; i < 16; i++) Serial.write(dados[i]);
     Serial.println();
     bipDuplo();
+    enviarComandoMotor();   // avisa o Arduino do motor
   } else {
     Serial.println(F("Erro ao ler o cartao."));
     bipErro();
@@ -183,6 +197,9 @@ void lerCartao() {
 
 // ===== INICIALIZACAO =====
 void setup() {
+  // Primeira coisa: reseta o Arduino do motor
+  resetarArduinoMotor();
+
   Serial.begin(9600);
   Serial.setTimeout(30000);
 
@@ -190,6 +207,7 @@ void setup() {
   digitalWrite(BUZZER, LOW);
 
   titulo(F("INICIANDO PN532"));
+  Serial.println(F("Arduino do motor resetado."));
 
   nfc.begin();
 

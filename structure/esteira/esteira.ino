@@ -13,12 +13,10 @@ const int PASSOS_POR_VOLTA = 2048;
 
 // Velocidade final em RPM.
 // O limite pratico do 28BYJ-48 em 5V e ~15 a 17 RPM.
-// Se quiser testar mais rapido, suba de 1 em 1 (16, 17...).
 // Se o motor so vibrar ou travar, diminua este valor.
 const int VELOCIDADE_RPM = 17;
 
-// Aceleracao gradual: comeca devagar e sobe ate VELOCIDADE_RPM,
-// o que aumenta a chance de o motor aguentar a velocidade alta.
+// Aceleracao gradual: comeca devagar e sobe ate VELOCIDADE_RPM
 const int RPM_INICIAL = 6;
 const int PASSOS_POR_AUMENTO = 60;   // a cada N passos sobe 1 RPM
 
@@ -26,12 +24,32 @@ const int PASSOS_POR_AUMENTO = 60;   // a cada N passos sobe 1 RPM
 // true  = cada novo comando "MOTOR" liga/desliga o motor
 const bool ALTERNAR_COM_NOVO_COMANDO = false;
 
+// ===== CONFIGURACOES DO SENSOR HC-SR04 =====
+#define TRIG A0
+#define ECHO A1
+
+// Distancia (cm) em que o objeto faz o motor parar
+const int DISTANCIA_PARADA_CM = 10;
+
+// Intervalo entre medicoes (ms)
+const unsigned long INTERVALO_MEDICAO = 50;
+
+// Quantas medicoes seguidas precisam detectar o objeto (evita falso positivo)
+const uint8_t LEITURAS_PARA_PARAR = 2;
+
+// false = depois de parar, so volta a girar com um novo comando "MOTOR"
+// true  = volta a girar sozinho quando o objeto sair da frente do sensor
+const bool RETOMAR_QUANDO_LIBERAR = false;
+
 // A ordem dos pinos e IN1, IN3, IN2, IN4 para a sequencia correta da bobina
 Stepper motor(PASSOS_POR_VOLTA, IN1, IN3, IN2, IN4);
 
 bool girando = false;
 int rpmAtual = RPM_INICIAL;
 int contaPassos = 0;
+bool objetoDetectado = false;
+uint8_t contaDeteccoes = 0;
+unsigned long ultimaMedicao = 0;
 
 // ===== RECEPCAO SERIAL =====
 char buffer[16];
@@ -43,6 +61,50 @@ void desligarBobinas() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
+}
+
+// Retorna true se houver objeto a DISTANCIA_PARADA_CM ou menos
+bool objetoPerto() {
+  digitalWrite(TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+
+  // Timeout curto para o motor nao ficar travado esperando o eco
+  unsigned long timeout = (unsigned long)DISTANCIA_PARADA_CM * 58UL + 500UL;
+  unsigned long duracao = pulseIn(ECHO, HIGH, timeout);
+
+  if (duracao == 0) return false;   // nada dentro do alcance
+  return (duracao / 58UL) <= DISTANCIA_PARADA_CM;
+}
+
+// Mede de tempos em tempos e para/retoma o motor
+void verificarSensor() {
+  if (millis() - ultimaMedicao < INTERVALO_MEDICAO) return;
+  ultimaMedicao = millis();
+
+  if (objetoPerto()) {
+    if (contaDeteccoes < LEITURAS_PARA_PARAR) contaDeteccoes++;
+  } else {
+    contaDeteccoes = 0;
+  }
+
+  bool detectado = (contaDeteccoes >= LEITURAS_PARA_PARAR);
+
+  if (detectado && girando) {
+    girando = false;            // para o motor
+    desligarBobinas();
+  }
+  else if (!detectado && objetoDetectado && RETOMAR_QUANDO_LIBERAR) {
+    // objeto saiu: retoma o giro
+    girando = true;
+    rpmAtual = RPM_INICIAL;
+    contaPassos = 0;
+    motor.setSpeed(rpmAtual);
+  }
+
+  objetoDetectado = detectado;
 }
 
 void tratarComando() {
@@ -82,16 +144,20 @@ void setup() {
   // Mesma velocidade do outro Arduino
   Serial.begin(9600);
 
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  digitalWrite(TRIG, LOW);
+
   motor.setSpeed(RPM_INICIAL);
   desligarBobinas();
 }
 
 void loop() {
   lerSerial();
+  verificarSensor();
 
   // Gira um passo por vez para continuar escutando o Serial
-  // OBS: este Arduino NAO imprime nada no Serial, para nao
-  // enviar lixo para o RX do Arduino leitor.
+  // OBS: este Arduino NAO imprime nada no Serial
   if (girando) {
     motor.step(1);
 
