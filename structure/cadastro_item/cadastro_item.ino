@@ -5,9 +5,6 @@
 #define SS_PIN 10
 #define BUZZER 8
 
-// Pino ligado ao RESET do Arduino do motor
-#define RESET_MOTOR 9
-
 // 0 = GRAVAR | 1 = LER
 int funcao = 1;
 
@@ -23,17 +20,27 @@ uint8_t uid[7];
 uint8_t uidLength;
 uint8_t dados[16];
 
-// ===== RESET DO ARDUINO DO MOTOR =====
-// Puxa o RESET do outro Arduino para LOW por 100 ms e depois solta.
-void resetarArduinoMotor() {
-  digitalWrite(RESET_MOTOR, LOW);
-  pinMode(RESET_MOTOR, OUTPUT);
-  delay(100);
-  pinMode(RESET_MOTOR, INPUT);      // solta o reset
+// ===== RESET POR CODIGO =====
+// Reinicia o PN532 por software. Retorna a versao do firmware (0 = falhou)
+uint32_t reiniciarPN532() {
+  nfc.begin();
+
+  uint32_t versao = nfc.getFirmwareVersion();
+  if (!versao) return 0;
+
+  nfc.SAMConfig();
+  nfc.setPassiveActivationRetries(0xFF);
+  return versao;
 }
 
-// ===== COMUNICACAO COM O ARDUINO DO MOTOR =====
-// Envia o comando "MOTOR" pelo TX (pino 1) para o RX (pino 0) do outro Arduino
+// Manda o comando "RESET" pelo TX (pino 1) para o RX (pino 0) do Arduino do motor.
+// Ele reinicia o motor e o sensor.
+void resetarArduinoMotor() {
+  Serial.println(F("RESET"));
+  delay(100);
+}
+
+// Manda o comando "MOTOR" para o Arduino do motor comecar a girar
 void enviarComandoMotor() {
   Serial.println(F("MOTOR"));
   Serial.println(F("Comando enviado ao motor."));
@@ -197,9 +204,6 @@ void lerCartao() {
 
 // ===== INICIALIZACAO =====
 void setup() {
-  // Primeira coisa: reseta o Arduino do motor
-  resetarArduinoMotor();
-
   Serial.begin(9600);
   Serial.setTimeout(30000);
 
@@ -207,11 +211,9 @@ void setup() {
   digitalWrite(BUZZER, LOW);
 
   titulo(F("INICIANDO PN532"));
-  Serial.println(F("Arduino do motor resetado."));
 
-  nfc.begin();
-
-  uint32_t versao = nfc.getFirmwareVersion();
+  // Reinicia o PN532 por codigo
+  uint32_t versao = reiniciarPN532();
   if (!versao) {
     Serial.println(F("ERRO: PN532 nao encontrado."));
     Serial.println(F("Verifique a ligacao SPI e as chaves DIP (SEL0=OFF, SEL1=ON)."));
@@ -226,11 +228,12 @@ void setup() {
   Serial.print((versao >> 16) & 0xFF);
   Serial.print('.');
   Serial.println((versao >> 8) & 0xFF);
+  Serial.println(F("PN532 reiniciado com sucesso!"));
 
-  nfc.SAMConfig();
-  nfc.setPassiveActivationRetries(0xFF);
+  // Reinicia o motor e o sensor (Arduino do motor)
+  resetarArduinoMotor();
+  Serial.println(F("Reset enviado ao motor e ao sensor."));
 
-  Serial.println(F("PN532 iniciado com sucesso!"));
   Serial.println(funcao == 0 ? F("MODO: GRAVACAO") : F("MODO: LEITURA"));
   linha('=');
   bip(100);
