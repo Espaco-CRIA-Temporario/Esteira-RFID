@@ -63,6 +63,33 @@ void desligarBobinas() {
   digitalWrite(IN4, LOW);
 }
 
+// ===== RESET POR CODIGO =====
+// Reinicia o motor e o sensor: para o giro, desliga as bobinas,
+// zera os contadores e configura os pinos de novo.
+void resetarTudo() {
+  // Motor
+  girando = false;
+  rpmAtual = RPM_INICIAL;
+  contaPassos = 0;
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  desligarBobinas();
+  motor.setSpeed(RPM_INICIAL);
+
+  // Sensor
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+  digitalWrite(TRIG, LOW);
+  objetoDetectado = false;
+  contaDeteccoes = 0;
+  ultimaMedicao = millis();
+
+  // Serial
+  tamanho = 0;
+}
+
 // Retorna true se houver objeto a DISTANCIA_PARADA_CM ou menos
 bool objetoPerto() {
   digitalWrite(TRIG, LOW);
@@ -127,9 +154,12 @@ void lerSerial() {
     if (c == '\n') {
       buffer[tamanho] = '\0';
 
-      // Ignora qualquer linha que nao seja exatamente "MOTOR"
+      // Ignora qualquer linha que nao seja um comando conhecido
       if (strcmp(buffer, "MOTOR") == 0) {
         tratarComando();
+      }
+      else if (strcmp(buffer, "RESET") == 0) {
+        resetarTudo();
       }
       tamanho = 0;
     }
@@ -144,12 +174,7 @@ void setup() {
   // Mesma velocidade do outro Arduino
   Serial.begin(9600);
 
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
-  digitalWrite(TRIG, LOW);
-
-  motor.setSpeed(RPM_INICIAL);
-  desligarBobinas();
+  resetarTudo();
 }
 
 void loop() {
