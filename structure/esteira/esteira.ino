@@ -28,6 +28,14 @@ const bool ALTERNAR_COM_NOVO_COMANDO = false;
 #define TRIG A0
 #define ECHO A1
 
+// LED embutido do Arduino: acende enquanto o sensor ve algo
+#define LED_SENSOR 13
+
+// true  = imprime distancia e deteccoes no Monitor Serial (so para teste!)
+// false = nao imprime nada (uso normal com o Arduino do RFID)
+// Para testar, desconecte o fio do pino RX (0) vindo do outro Arduino.
+const bool DEBUG_SERIAL = true;
+
 // Distancia (cm) em que o objeto faz o motor parar
 const int DISTANCIA_PARADA_CM = 10;
 
@@ -82,6 +90,8 @@ void resetarTudo() {
   pinMode(TRIG, OUTPUT);
   pinMode(ECHO, INPUT);
   digitalWrite(TRIG, LOW);
+  pinMode(LED_SENSOR, OUTPUT);
+  digitalWrite(LED_SENSOR, LOW);
   objetoDetectado = false;
   contaDeteccoes = 0;
   ultimaMedicao = millis();
@@ -90,20 +100,30 @@ void resetarTudo() {
   tamanho = 0;
 }
 
-// Retorna true se houver objeto a DISTANCIA_PARADA_CM ou menos
-bool objetoPerto() {
+// Retorna a distancia em cm (0 = nada dentro do alcance)
+unsigned long medirDistanciaCm() {
   digitalWrite(TRIG, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG, LOW);
 
-  // Timeout curto para o motor nao ficar travado esperando o eco
-  unsigned long timeout = (unsigned long)DISTANCIA_PARADA_CM * 58UL + 500UL;
-  unsigned long duracao = pulseIn(ECHO, HIGH, timeout);
+  unsigned long duracao = pulseIn(ECHO, HIGH, 3000UL);  // ~50 cm
+  if (duracao == 0) return 0;
+  return duracao / 58UL;
+}
 
-  if (duracao == 0) return false;   // nada dentro do alcance
-  return (duracao / 58UL) <= DISTANCIA_PARADA_CM;
+// true se houver objeto a DISTANCIA_PARADA_CM ou menos
+bool objetoPerto() {
+  unsigned long cm = medirDistanciaCm();
+
+  if (DEBUG_SERIAL) {
+    Serial.print(F("Distancia: "));
+    if (cm == 0) Serial.println(F("--"));
+    else { Serial.print(cm); Serial.println(F(" cm")); }
+  }
+
+  return (cm != 0 && cm <= DISTANCIA_PARADA_CM);
 }
 
 // Mede de tempos em tempos e para/retoma o motor
@@ -111,13 +131,23 @@ void verificarSensor() {
   if (millis() - ultimaMedicao < INTERVALO_MEDICAO) return;
   ultimaMedicao = millis();
 
-  if (objetoPerto()) {
+  bool perto = objetoPerto();
+
+  // LED reage na hora a cada leitura
+  digitalWrite(LED_SENSOR, perto);
+
+  if (perto) {
     if (contaDeteccoes < LEITURAS_PARA_PARAR) contaDeteccoes++;
   } else {
     contaDeteccoes = 0;
   }
 
   bool detectado = (contaDeteccoes >= LEITURAS_PARA_PARAR);
+
+  // Avisa so quando o estado muda
+  if (DEBUG_SERIAL && detectado != objetoDetectado) {
+    Serial.println(detectado ? F(">>> OBJETO DETECTADO!") : F(">>> Objeto saiu."));
+  }
 
   if (detectado && girando) {
     girando = false;            // para o motor
@@ -182,7 +212,6 @@ void loop() {
   verificarSensor();
 
   // Gira um passo por vez para continuar escutando o Serial
-  // OBS: este Arduino NAO imprime nada no Serial
   if (girando) {
     motor.step(1);
 
