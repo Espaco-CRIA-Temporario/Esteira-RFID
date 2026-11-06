@@ -1,225 +1,329 @@
-#include <Stepper.h>
+/*
+  ESTEIRA - Arduino da esteira
+  Motor de passo 28BYJ-48 (ULN2003), 3 sensores HC-SR04, 3 servos.
 
-// ===== CONFIGURACOES DO MOTOR =====
-// Motor 28BYJ-48 (5V) com driver ULN2003
-// IN1 = 8 | IN2 = 9 | IN3 = 10 | IN4 = 11
-#define IN1 8
-#define IN2 9
-#define IN3 10
-#define IN4 11
+  Ligações:
+    ULN2003:  IN1=8  IN2=9  IN3=10  IN4=11  (ordem normal)
+    HC-SR04 1 (doca 1): TRIG=A0  ECHO=A1
+    HC-SR04 2 (doca 2): TRIG=A2  ECHO=A3
+    HC-SR04 3 (doca 3): TRIG=A4  ECHO=A5
+    Servo 1=5   Servo 2=6   Servo 3=7
+    LED externo (com resistor 220-330 ohm): pino 13
+    Serial: RX (pino 0) <- TX (pino 1) do leitor
+            TX (pino 1) -> RX (pino 0) do leitor
+            GND comum entre as placas
+    ATENÇÃO: motor e servos devem ter fonte externa de 5 V (GND em comum).
 
-// Passos por volta completa do eixo (28BYJ-48 = 2048 no modo full-step)
-const int PASSOS_POR_VOLTA = 2048;
+  A doca 1 é a mais perto do leitor, a doca 3 a mais longe.
 
-// Velocidade final em RPM.
-// O limite pratico do 28BYJ-48 em 5V e ~15 a 17 RPM.
-// Se o motor so vibrar ou travar, diminua este valor.
-const int VELOCIDADE_RPM = 17;
+  Protocolo serial (9600, linhas terminadas em \n):
+    recebe:  RESET        limpa a fila e desliga a esteira
+             CAIXA:n      nova caixa no fim da fila, destino = doca n (1..3)
+    envia:   ERRO         caixa detectada sem destino (o buzzer do leitor apita)
+             # texto      depuração (o leitor ignora)
 
-// Aceleracao gradual: comeca devagar e sobe ate VELOCIDADE_RPM
-const int RPM_INICIAL = 6;
-const int PASSOS_POR_AUMENTO = 60;   // a cada N passos sobe 1 RPM
+  Lógica:
+    - A fila guarda o destino de cada caixa, na ordem em que foram cadastradas.
+    - Cada sensor lembra quantas caixas da fila já passaram por ele.
+    - Quando um sensor vê uma caixa: se o destino dela é a doca do sensor, a
+      esteira pausa, o servo bate e volta, e a esteira anda de novo.
+      Se o destino é uma doca mais à frente, a caixa passa direto.
+    - Fila vazia = motor desligado.
 
-// false = depois do primeiro comando gira para sempre
-// true  = cada novo comando "MOTOR" liga/desliga o motor
-const bool ALTERNAR_COM_NOVO_COMANDO = false;
+  IMPORTANTE: ao fazer upload, desconecte o fio do pino 0 (RX).
+*/
 
-// ===== CONFIGURACOES DO SENSOR HC-SR04 =====
-#define TRIG A0
-#define ECHO A1
+#include <Servo.h>
 
-// LED embutido do Arduino: acende enquanto o sensor ve algo
-#define LED_SENSOR 13
+// ===================== CONFIGURAÇÃO =====================
+const bool DEBUG = false;   // true = imprime mensagens "# ..." na serial
 
-// true  = imprime distancia e deteccoes no Monitor Serial (so para teste!)
-// false = nao imprime nada (uso normal com o Arduino do RFID)
-// Para testar, desconecte o fio do pino RX (0) vindo do outro Arduino.
-const bool DEBUG_SERIAL = true;
+const uint8_t MOTOR_PINOS[4] = {8, 9, 10, 11};
+const uint8_t TRIG_PINOS[3]  = {A0, A2, A4};
+const uint8_t ECHO_PINOS[3]  = {A1, A3, A5};
+const uint8_t SERVO_PINOS[3] = {5, 6, 7};
+const uint8_t LED_SENSOR = 13;
 
-// Distancia (cm) em que o objeto faz o motor parar
-const int DISTANCIA_PARADA_CM = 10;
+// Sensores
+const uint8_t DIST_DETECTA_CM = 10;   // objeto a 10 cm ou menos = caixa presente
+const uint8_t DIST_LIBERA_CM  = 14;   // acima disso = caixa saiu (histerese)
+const uint8_t CONFIRMACOES    = 2;    // leituras seguidas para confirmar
+const unsigned long INTERVALO_SENSOR_MS = 20;  // um sensor lido a cada 20 ms
+const unsigned long ECHO_TIMEOUT_US = 2500;    // ~40 cm, evita travar o motor
 
-// Intervalo entre medicoes (ms)
-const unsigned long INTERVALO_MEDICAO = 50;
+// Servos (ajuste 0/90 se algum servo ficar do lado oposto, ex.: repouso 180 e bate 90)
+const uint8_t ANG_REPOUSO[3] = {0, 0, 0};
+const uint8_t ANG_BATE[3]    = {90, 90, 90};
+const unsigned int TEMPO_ASSENTAR_MS = 150;  // espera a caixa parar antes de bater
+const unsigned int TEMPO_BATIDA_MS   = 250;  // tempo com o servo estendido
 
-// Quantas medicoes seguidas precisam detectar o objeto (evita falso positivo)
-const uint8_t LEITURAS_PARA_PARAR = 2;
+// Motor de passo (passo completo, 2048 passos por volta)
+const int PASSOS_VOLTA = 2048;
+const uint8_t RPM_MIN = 6;
+const uint8_t RPM_MAX = 17;
+const unsigned int RAMPA_MS = 150;     // +1 RPM a cada 150 ms
+const bool SENTIDO_NORMAL = true;      // false inverte o sentido da esteira
 
-// false = depois de parar, so volta a girar com um novo comando "MOTOR"
-// true  = volta a girar sozinho quando o objeto sair da frente do sensor
-const bool RETOMAR_QUANDO_LIBERAR = false;
+const uint8_t MAX_FILA = 20;
+// ========================================================
 
-// A ordem dos pinos e IN1, IN3, IN2, IN4 para a sequencia correta da bobina
-Stepper motor(PASSOS_POR_VOLTA, IN1, IN3, IN2, IN4);
+const uint8_t SEQ[4][4] = {
+  {1, 1, 0, 0},
+  {0, 1, 1, 0},
+  {0, 0, 1, 1},
+  {1, 0, 0, 1}
+};
 
-bool girando = false;
-int rpmAtual = RPM_INICIAL;
-int contaPassos = 0;
-bool objetoDetectado = false;
-uint8_t contaDeteccoes = 0;
-unsigned long ultimaMedicao = 0;
+Servo servos[3];
 
-// ===== RECEPCAO SERIAL =====
-char buffer[16];
-uint8_t tamanho = 0;
+// fila de caixas (guarda a doca de destino, 1..3)
+uint8_t fila[MAX_FILA];
+uint8_t qtd = 0;
+// quantas caixas da fila já passaram por cada sensor
+uint8_t passou[3] = {0, 0, 0};
 
-// Desliga as bobinas para o motor e o driver nao esquentarem parado
-void desligarBobinas() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+// estado dos sensores
+bool presente[3] = {false, false, false};
+uint8_t contaOn[3]  = {0, 0, 0};
+uint8_t contaOff[3] = {0, 0, 0};
+uint8_t sensorAtual = 0;
+unsigned long tSensor = 0;
+
+// motor
+bool motorLigado = false;
+uint8_t faseMotor = 0;
+uint8_t rpmAtual = RPM_MIN;
+unsigned long tUltimoPassoUs = 0;
+unsigned long tRampa = 0;
+
+// serial
+char linha[24];
+uint8_t posLinha = 0;
+
+// ---------------------- utilidades ----------------------
+void depurar(const __FlashStringHelper* msg, int valor = -1) {
+  if (!DEBUG) return;
+  Serial.print(F("# "));
+  Serial.print(msg);
+  if (valor >= 0) {
+    Serial.print(' ');
+    Serial.print(valor);
+  }
+  Serial.println();
 }
 
-// ===== RESET POR CODIGO =====
-// Reinicia o motor e o sensor: para o giro, desliga as bobinas,
-// zera os contadores e configura os pinos de novo.
-void resetarTudo() {
-  // Motor
-  girando = false;
-  rpmAtual = RPM_INICIAL;
-  contaPassos = 0;
-  pinMode(IN1, OUTPUT);
-  pinMode(IN2, OUTPUT);
-  pinMode(IN3, OUTPUT);
-  pinMode(IN4, OUTPUT);
-  desligarBobinas();
-  motor.setSpeed(RPM_INICIAL);
-
-  // Sensor
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
-  digitalWrite(TRIG, LOW);
-  pinMode(LED_SENSOR, OUTPUT);
-  digitalWrite(LED_SENSOR, LOW);
-  objetoDetectado = false;
-  contaDeteccoes = 0;
-  ultimaMedicao = millis();
-
-  // Serial
-  tamanho = 0;
+void enviarErro(const __FlashStringHelper* motivo) {
+  Serial.println(F("ERRO"));
+  depurar(motivo);
 }
 
-// Retorna a distancia em cm (0 = nada dentro do alcance)
-unsigned long medirDistanciaCm() {
-  digitalWrite(TRIG, LOW);
+// ---------------------- motor ----------------------
+void aplicarFase() {
+  for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], SEQ[faseMotor][i]);
+}
+
+void ligarMotor() {
+  if (motorLigado) return;
+  motorLigado = true;
+  rpmAtual = RPM_MIN;            // sempre arranca devagar (rampa)
+  tRampa = millis();
+  tUltimoPassoUs = micros();
+  depurar(F("motor ligado"));
+}
+
+// só para de dar passos, mantém as bobinas energizadas (segura a esteira)
+void pausarMotor() {
+  motorLigado = false;
+}
+
+// para e solta as bobinas (não esquenta)
+void desligarMotor() {
+  motorLigado = false;
+  for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], LOW);
+  depurar(F("motor desligado"));
+}
+
+void atualizarMotor() {
+  if (!motorLigado) return;
+
+  unsigned long agoraMs = millis();
+  if (rpmAtual < RPM_MAX && agoraMs - tRampa >= RAMPA_MS) {
+    rpmAtual++;
+    tRampa = agoraMs;
+  }
+
+  unsigned long intervaloUs = 60000000UL / ((unsigned long)PASSOS_VOLTA * rpmAtual);
+  unsigned long agoraUs = micros();
+  if (agoraUs - tUltimoPassoUs >= intervaloUs) {
+    tUltimoPassoUs = agoraUs;
+    faseMotor = SENTIDO_NORMAL ? ((faseMotor + 1) & 3) : ((faseMotor + 3) & 3);
+    aplicarFase();
+  }
+}
+
+// ---------------------- fila ----------------------
+void resetar() {
+  qtd = 0;
+  for (uint8_t s = 0; s < 3; s++) passou[s] = 0;
+  desligarMotor();
+  depurar(F("reset"));
+}
+
+void adicionarCaixa(uint8_t doca) {
+  if (qtd >= MAX_FILA) {
+    enviarErro(F("fila cheia"));
+    return;
+  }
+  fila[qtd++] = doca;
+  depurar(F("caixa na fila, doca"), doca);
+  ligarMotor();
+}
+
+// remove a caixa de índice idx, que estava no sensor "sensor" (0..2)
+void removerCaixa(uint8_t idx, uint8_t sensor) {
+  for (uint8_t k = idx; k + 1 < qtd; k++) fila[k] = fila[k + 1];
+  qtd--;
+  // os sensores antes deste já tinham contado essa caixa
+  for (uint8_t j = 0; j < sensor; j++) {
+    if (passou[j] > 0) passou[j]--;
+  }
+}
+
+// ---------------------- servos ----------------------
+void entregar(uint8_t s, uint8_t idx) {
+  pausarMotor();
+  delay(TEMPO_ASSENTAR_MS);
+  servos[s].write(ANG_BATE[s]);
+  delay(TEMPO_BATIDA_MS);
+  servos[s].write(ANG_REPOUSO[s]);   // volta e a esteira anda junto
+
+  removerCaixa(idx, s);
+  depurar(F("entregue na doca"), s + 1);
+
+  if (qtd > 0) ligarMotor();
+  else desligarMotor();
+}
+
+// ---------------------- sensores ----------------------
+uint16_t lerDistanciaCm(uint8_t s) {
+  digitalWrite(TRIG_PINOS[s], LOW);
   delayMicroseconds(2);
-  digitalWrite(TRIG, HIGH);
+  digitalWrite(TRIG_PINOS[s], HIGH);
   delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
-
-  unsigned long duracao = pulseIn(ECHO, HIGH, 3000UL);  // ~50 cm
-  if (duracao == 0) return 0;
-  return duracao / 58UL;
+  digitalWrite(TRIG_PINOS[s], LOW);
+  unsigned long duracao = pulseIn(ECHO_PINOS[s], HIGH, ECHO_TIMEOUT_US);
+  if (duracao == 0) return 999;   // nada por perto
+  return duracao / 58;
 }
 
-// true se houver objeto a DISTANCIA_PARADA_CM ou menos
-bool objetoPerto() {
-  unsigned long cm = medirDistanciaCm();
+// um sensor viu uma caixa nova
+void tratarDeteccao(uint8_t s) {
+  uint8_t idx = passou[s];
 
-  if (DEBUG_SERIAL) {
-    Serial.print(F("Distancia: "));
-    if (cm == 0) Serial.println(F("--"));
-    else { Serial.print(cm); Serial.println(F(" cm")); }
+  if (idx >= qtd) {
+    enviarErro(F("caixa sem destino no sensor"));
+    return;
   }
 
-  return (cm != 0 && cm <= DISTANCIA_PARADA_CM);
-}
+  uint8_t destino = fila[idx];
+  uint8_t doca = s + 1;
 
-// Mede de tempos em tempos e para/retoma o motor
-void verificarSensor() {
-  if (millis() - ultimaMedicao < INTERVALO_MEDICAO) return;
-  ultimaMedicao = millis();
-
-  bool perto = objetoPerto();
-
-  // LED reage na hora a cada leitura
-  digitalWrite(LED_SENSOR, perto);
-
-  if (perto) {
-    if (contaDeteccoes < LEITURAS_PARA_PARAR) contaDeteccoes++;
+  if (destino == doca) {
+    entregar(s, idx);
+  } else if (destino > doca) {
+    passou[s]++;                       // passa direto
+    depurar(F("passou direto no sensor"), doca);
   } else {
-    contaDeteccoes = 0;
-  }
-
-  bool detectado = (contaDeteccoes >= LEITURAS_PARA_PARAR);
-
-  // Avisa so quando o estado muda
-  if (DEBUG_SERIAL && detectado != objetoDetectado) {
-    Serial.println(detectado ? F(">>> OBJETO DETECTADO!") : F(">>> Objeto saiu."));
-  }
-
-  if (detectado && girando) {
-    girando = false;            // para o motor
-    desligarBobinas();
-  }
-  else if (!detectado && objetoDetectado && RETOMAR_QUANDO_LIBERAR) {
-    // objeto saiu: retoma o giro
-    girando = true;
-    rpmAtual = RPM_INICIAL;
-    contaPassos = 0;
-    motor.setSpeed(rpmAtual);
-  }
-
-  objetoDetectado = detectado;
-}
-
-void tratarComando() {
-  if (!girando) {
-    girando = true;
-    rpmAtual = RPM_INICIAL;      // sempre arranca com a rampa
-    contaPassos = 0;
-    motor.setSpeed(rpmAtual);
-  } else if (ALTERNAR_COM_NOVO_COMANDO) {
-    girando = false;
-    desligarBobinas();
+    // devia ter sido entregue antes: tira da fila para não travar a esteira
+    removerCaixa(idx, s);
+    enviarErro(F("caixa passou da sua doca"));
+    if (qtd == 0) desligarMotor();
   }
 }
 
-// Le o Serial sem travar o motor
+void atualizarSensor(uint8_t s) {
+  uint16_t cm = lerDistanciaCm(s);
+
+  if (!presente[s]) {
+    if (cm <= DIST_DETECTA_CM) {
+      if (++contaOn[s] >= CONFIRMACOES) {
+        contaOn[s] = 0;
+        presente[s] = true;
+        tratarDeteccao(s);
+      }
+    } else {
+      contaOn[s] = 0;
+    }
+  } else {
+    if (cm > DIST_LIBERA_CM) {
+      if (++contaOff[s] >= CONFIRMACOES) {
+        contaOff[s] = 0;
+        presente[s] = false;
+      }
+    } else {
+      contaOff[s] = 0;
+    }
+  }
+}
+
+// ---------------------- serial ----------------------
+void processarLinha() {
+  if (strcmp(linha, "RESET") == 0) {
+    resetar();
+  } else if (strncmp(linha, "CAIXA:", 6) == 0) {
+    uint8_t doca = linha[6] - '0';
+    if (doca >= 1 && doca <= 3) adicionarCaixa(doca);
+  }
+  // qualquer outra linha (ex.: "# ...") é ignorada
+}
+
 void lerSerial() {
   while (Serial.available()) {
     char c = Serial.read();
-
-    if (c == '\n') {
-      buffer[tamanho] = '\0';
-
-      // Ignora qualquer linha que nao seja um comando conhecido
-      if (strcmp(buffer, "MOTOR") == 0) {
-        tratarComando();
+    if (c == '\n' || c == '\r') {
+      if (posLinha > 0) {
+        linha[posLinha] = 0;
+        processarLinha();
+        posLinha = 0;
       }
-      else if (strcmp(buffer, "RESET") == 0) {
-        resetarTudo();
-      }
-      tamanho = 0;
-    }
-    else if (c != '\r') {
-      if (tamanho < sizeof(buffer) - 1) buffer[tamanho++] = c;
-      else tamanho = 0;  // linha longa demais (texto de debug): descarta
+    } else if (posLinha < sizeof(linha) - 1) {
+      linha[posLinha++] = c;
+    } else {
+      posLinha = 0;  // linha longa demais: descarta
     }
   }
 }
 
+// ---------------------- setup / loop ----------------------
 void setup() {
-  // Mesma velocidade do outro Arduino
   Serial.begin(9600);
 
-  resetarTudo();
+  for (uint8_t i = 0; i < 4; i++) {
+    pinMode(MOTOR_PINOS[i], OUTPUT);
+    digitalWrite(MOTOR_PINOS[i], LOW);
+  }
+  for (uint8_t s = 0; s < 3; s++) {
+    pinMode(TRIG_PINOS[s], OUTPUT);
+    digitalWrite(TRIG_PINOS[s], LOW);
+    pinMode(ECHO_PINOS[s], INPUT);
+    servos[s].attach(SERVO_PINOS[s]);
+    servos[s].write(ANG_REPOUSO[s]);
+  }
+  pinMode(LED_SENSOR, OUTPUT);
+  digitalWrite(LED_SENSOR, LOW);
+
+  depurar(F("esteira pronta"));
 }
 
 void loop() {
   lerSerial();
-  verificarSensor();
+  atualizarMotor();
 
-  // Gira um passo por vez para continuar escutando o Serial
-  if (girando) {
-    motor.step(1);
-
-    // Rampa de aceleracao ate a velocidade final
-    if (rpmAtual < VELOCIDADE_RPM && ++contaPassos >= PASSOS_POR_AUMENTO) {
-      contaPassos = 0;
-      rpmAtual++;
-      motor.setSpeed(rpmAtual);
-    }
+  unsigned long agora = millis();
+  if (agora - tSensor >= INTERVALO_SENSOR_MS) {
+    tSensor = agora;
+    atualizarSensor(sensorAtual);
+    sensorAtual = (sensorAtual + 1) % 3;
+    digitalWrite(LED_SENSOR, (presente[0] || presente[1] || presente[2]) ? HIGH : LOW);
   }
 }
