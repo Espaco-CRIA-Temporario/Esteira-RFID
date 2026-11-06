@@ -111,5 +111,21 @@ s, j = tag("11223344", "LEITOR-SAI-4")
 check("doca de saida certa aciona a esteira com rota 4", s == 200 and j["esteira"] and j["rota"] == 4)
 check("pagina com leitor fisico abre", b"campo-uid" in c.get("/").data)
 
+# ---- leitor ESTEIRA (inicio da esteira) ----
+c.post("/produtos", data={"uid": "ABCD0001", "tipo_id": 1})  # TV 45 -> id 3
+s, j = tag("ABCD0001", "ESTEIRA")
+check("ESTEIRA recusa produto sem destino", s == 422 and not j["esteira"])
+tag("ABCD0001", "LEITOR-ENT-3")
+tag("ABCD0001", "LEITOR-PP-TV45-B")
+with A.app.app_context():
+    A.definir_destino(A.get_db(), 3, 2)
+s, j = tag("ABCD0001", "ESTEIRA")
+check("ESTEIRA libera produto com destino 2", s == 200 and j["esteira"] and j["rota"] == 2)
+s, j = tag("ABCD0001", "ESTEIRA")
+check("ESTEIRA nao libera o mesmo produto duas vezes", s == 422 and not j["esteira"])
+check("ESTEIRA com tag desconhecida", tag("00000000", "ESTEIRA")[0] == 422)
+c.post("/leitor-ativo", data={"leitor": "ESTEIRA"})
+check("leitor ativo pode ser ESTEIRA", b'value="ESTEIRA" selected' in c.get("/").data)
+
 print("\nFalhas:", falhas)
 raise SystemExit(1 if falhas else 0)

@@ -12,6 +12,13 @@ app = Flask(__name__)
 # Em qual tipo de leitor a esteira deve andar (DOCA_ENTRADA, PALET ou DOCA_SAIDA)
 ESTEIRA_ACIONA_EM = "DOCA_SAIDA"
 
+# Leitor virtual: o leitor fisico no INICIO da esteira. Nao precisa existir na tabela leitores.
+# Produto com destino definido que passa aqui e liberado na esteira para a doca do seu destino.
+ESTEIRA_INICIO = "ESTEIRA"
+
+# Quantas docas a esteira fisica atende (3 sensores + 3 servos). Destinos acima disso sao recusados.
+ESTEIRA_DOCAS = 3
+
 
 # ---------------------------------------------------------------- banco
 def get_db():
@@ -97,6 +104,17 @@ def processar_leitura(db, uid, leitor_codigo):
         db.commit()
         return ok, msg
 
+    if leitor_codigo == ESTEIRA_INICIO:
+        if not produto:
+            return fim(False, "Tag nao cadastrada.")
+        if produto["status"] != "DESTINO_DEFINIDO":
+            return fim(False, f"Produto sem destino definido / fora de sequencia (status: {produto['status']}).")
+        d = db.execute("SELECT nome, rota_esteira FROM destinos WHERE id=?", (produto["destino_id"],)).fetchone()
+        if d["rota_esteira"] > ESTEIRA_DOCAS:
+            return fim(False, f"A esteira so atende {ESTEIRA_DOCAS} docas; o {d['nome']} nao e atendido por ela.")
+        db.execute("UPDATE produtos SET status='ENTREGUE' WHERE id=?", (produto["id"],))
+        return fim(True, f"Produto liberado na esteira para o {d['nome']}.")
+
     if not leitor:
         return fim(False, "Leitor desconhecido.")
     if not produto:
@@ -179,7 +197,7 @@ def api_tag_lida():
     esteira, rota = False, None
     leitor = db.execute("SELECT local FROM leitores WHERE codigo=?", (alvo,)).fetchone()
     # A esteira anda quando um produto passa com sucesso pela doca de saida.
-    if ok and leitor and leitor["local"] == ESTEIRA_ACIONA_EM:
+    if ok and (alvo == ESTEIRA_INICIO or (leitor and leitor["local"] == ESTEIRA_ACIONA_EM)):
         esteira = True
         r = db.execute(
             """SELECT d.rota_esteira FROM produtos p JOIN destinos d ON d.id = p.destino_id
@@ -226,6 +244,7 @@ PAGINA = """<!doctype html>
   O leitor esta funcionando como:
   <select name="leitor">
     <option value="CADASTRO" {{ 'selected' if ativo == 'CADASTRO' }}>CADASTRO (so captura o UID)</option>
+    <option value="ESTEIRA" {{ 'selected' if ativo == 'ESTEIRA' }}>ESTEIRA (inicio da esteira: libera o produto para o destino)</option>
     {% for l in leitores %}<option value="{{l.codigo}}" {{ 'selected' if ativo == l.codigo }}>{{l.codigo}}</option>{% endfor %}
   </select>
   <button>Trocar</button>
@@ -256,7 +275,7 @@ PAGINA = """<!doctype html>
 <h2>3. Simular leitura de tag (no lugar do Arduino)</h2>
 <form method="post" action="/simular">
   Produto: <select name="uid">{% for p in produtos %}<option value="{{p.tag_uid}}">{{p.tag_uid}} ({{p.tipo}})</option>{% endfor %}</select>
-  Leitor: <select name="leitor">{% for l in leitores %}<option value="{{l.codigo}}">{{l.codigo}}</option>{% endfor %}</select>
+  Leitor: <select name="leitor"><option value="ESTEIRA">ESTEIRA</option>{% for l in leitores %}<option value="{{l.codigo}}">{{l.codigo}}</option>{% endfor %}</select>
   <button>Ler tag</button>
 </form>
 
@@ -346,7 +365,7 @@ def destino(pid):
 def trocar_leitor():
     db = get_db()
     alvo = request.form["leitor"]
-    if alvo != "CADASTRO" and not db.execute("SELECT 1 FROM leitores WHERE codigo=?", (alvo,)).fetchone():
+    if alvo not in ("CADASTRO", ESTEIRA_INICIO) and not db.execute("SELECT 1 FROM leitores WHERE codigo=?", (alvo,)).fetchone():
         return voltar("Leitor invalido.")
     db.execute("UPDATE config SET valor=? WHERE chave='leitor_ativo'", (alvo,))
     db.commit()
