@@ -110,6 +110,8 @@ with A.app.app_context():
 s, j = tag("11223344", "LEITOR-SAI-4")
 check("doca de saida certa aciona a esteira com rota 4", s == 200 and j["esteira"] and j["rota"] == 4)
 check("pagina com leitor fisico abre", b"campo-uid" in c.get("/").data)
+r = c.get("/banco")
+check("pagina /banco mostra as tabelas e os dados", r.status_code == 200 and b"eventos_leitura" in r.data and b"11223344" in r.data)
 
 # ---- leitor ESTEIRA (inicio da esteira) ----
 c.post("/produtos", data={"uid": "ABCD0001", "tipo_id": 1})  # TV 45 -> id 3

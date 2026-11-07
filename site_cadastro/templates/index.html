@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8"><title>Teste - Armazem</title></head><body>
+<h1>Armazem - teste do banco de dados</h1>
+<p><a href="/banco">banco de dados</a></p>
+{% if msg %}<p><b>>> {{ msg }}</b></p>{% endif %}
+
+<h2>0. Leitor fisico (RFID)</h2>
+<form method="post" action="/leitor-ativo">
+  O leitor esta funcionando como:
+  <select name="leitor">
+    <option value="CADASTRO" {{ 'selected' if ativo == 'CADASTRO' }}>CADASTRO (so captura o UID)</option>
+    <option value="ESTEIRA" {{ 'selected' if ativo == 'ESTEIRA' }}>ESTEIRA (inicio da esteira: libera o produto para o destino)</option>
+    {% for l in leitores %}<option value="{{l.codigo}}" {{ 'selected' if ativo == l.codigo }}>{{l.codigo}}</option>{% endfor %}
+  </select>
+  <button>Trocar</button>
+</form>
+<p id="aviso-tag">Ultima tag lida no cadastro: <b id="ultima-uid">{{ ultima.tag_uid if ultima else '(nenhuma)' }}</b></p>
+
+<h2>1. Cadastrar produto</h2>
+<form method="post" action="/produtos">
+  UID da tag: <input id="campo-uid" name="uid" required placeholder="aproxime a tag do leitor ou digite">
+  Tipo: <select name="tipo_id">{% for t in tipos %}<option value="{{t.id}}">{{t.descricao}}</option>{% endfor %}</select>
+  <button>Cadastrar</button>
+</form>
+
+<h2>2. Produtos</h2>
+<table border="1" cellpadding="4">
+<tr><th>ID</th><th>UID</th><th>Tipo</th><th>Status</th><th>Palet</th><th>Destino</th><th>Definir destino</th></tr>
+{% for p in produtos %}
+<tr><td>{{p.id}}</td><td>{{p.tag_uid}}</td><td>{{p.tipo}}</td><td>{{p.status}}</td>
+<td>{{p.palet or '-'}}</td><td>{{p.destino or '-'}}</td>
+<td>{% if p.status in ('NO_PALET','DESTINO_DEFINIDO') %}
+<form method="post" action="/produtos/{{p.id}}/destino">
+<select name="destino_id">{% for d in destinos %}<option value="{{d.id}}">{{d.nome}}</option>{% endfor %}</select>
+<button>Salvar</button></form>
+{% elif p.status == 'ENTREGUE' %}-{% else %}(aguardando chegar ao palet){% endif %}</td></tr>
+{% endfor %}
+</table>
+
+<h2>3. Simular leitura de tag (no lugar do Arduino)</h2>
+<form method="post" action="/simular">
+  Produto: <select name="uid">{% for p in produtos %}<option value="{{p.tag_uid}}">{{p.tag_uid}} ({{p.tipo}})</option>{% endfor %}</select>
+  Leitor: <select name="leitor"><option value="ESTEIRA">ESTEIRA</option>{% for l in leitores %}<option value="{{l.codigo}}">{{l.codigo}}</option>{% endfor %}</select>
+  <button>Ler tag</button>
+</form>
+
+<h2>4. Porta-palets</h2>
+<table border="1" cellpadding="4">
+<tr><th>Palet</th><th>Tipo</th><th>Produtos nele</th></tr>
+{% for pp in palets %}<tr><td>{{pp.codigo}}</td><td>{{pp.tipo}}</td><td>{{pp.qtd}}</td></tr>{% endfor %}
+</table>
+
+<h2>5. Docas</h2>
+<table border="1" cellpadding="4">
+<tr><th>Doca</th><th>Tipo</th><th>Destino</th></tr>
+{% for d in docas %}<tr><td>{{d.codigo}}</td><td>{{d.tipo}}</td><td>{{d.destino or '-'}}</td></tr>{% endfor %}
+</table>
+
+<h2>6. Ultimos eventos</h2>
+<table border="1" cellpadding="4">
+<tr><th>Data/hora</th><th>UID</th><th>Leitor</th><th>OK?</th><th>Resultado</th></tr>
+{% for e in eventos %}<tr><td>{{e.data_hora}}</td><td>{{e.tag_uid}}</td><td>{{e.leitor or '-'}}</td>
+<td>{{'sim' if e.sucesso else 'NAO'}}</td><td>{{e.resultado}}</td></tr>{% endfor %}
+</table>
+<script>
+let ultimaSeq = {{ ultima.seq if ultima else 0 }};
+setInterval(async () => {
+  try {
+    const r = await (await fetch('/api/ultima-leitura')).json();
+    if (r.seq > ultimaSeq) {
+      ultimaSeq = r.seq;
+      document.getElementById('campo-uid').value = r.uid;
+      document.getElementById('ultima-uid').textContent = r.uid;
+    }
+  } catch (e) {}
+}, 1000);
+</script>
+</body></html>

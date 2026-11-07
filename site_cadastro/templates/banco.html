@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+<title>Banco de dados</title></head><body>
+<p><a href="/">&larr; Voltar</a> | Atualiza sozinho a cada 5 segundos | arquivo: {{ arquivo }}</p>
+<h1>Banco de dados</h1>
+<p>Tabelas: {% for t in dados %}<a href="#{{ t.nome }}">{{ t.nome }}</a>{% if not loop.last %} | {% endif %}{% endfor %}</p>
+{% for t in dados %}
+<h2 id="{{ t.nome }}">{{ t.nome }} ({{ t.total }} linhas{% if t.total > t.linhas|length %}, mostrando as {{ t.linhas|length }} mais recentes{% endif %})</h2>
+{% if t.linhas %}
+<table border="1" cellpadding="4">
+<tr>{% for c in t.colunas %}<th>{{ c }}</th>{% endfor %}</tr>
+{% for l in t.linhas %}<tr>{% for v in l %}<td>{{ '' if v is none else v }}</td>{% endfor %}</tr>{% endfor %}
+</table>
+{% else %}<p>(vazia)</p>{% endif %}
+{% endfor %}
+</body></html>

@@ -9,6 +9,7 @@ import requests  # noqa: E402
 from werkzeug.serving import make_server  # noqa: E402
 
 import app as A  # noqa: E402
+import regras  # noqa: E402
 import ponte  # noqa: E402
 
 srv = make_server("127.0.0.1", 5057, A.app)
@@ -74,7 +75,7 @@ check("produto recusado continua com destino definido", st == "DESTINO_DEFINIDO"
 requests.post(API + "/produtos", data={"uid": "AA000005", "tipo_id": 1})
 passo("AA000005", "LEITOR-ENT-2"); passo("AA000005", "LEITOR-PP-TV45-A")
 requests.post(API + "/produtos/3/destino", data={"destino_id": 4})
-A.ESTEIRA_DOCAS = 4   # simula uma esteira de 4 docas
+regras.ESTEIRA_DOCAS = 4   # simula uma esteira de 4 docas
 check("com docas=4 envia CAIXA:4", passo("AA000005", "ESTEIRA", docas=4) == (["OK"], ["CAIXA:4"]))
 
 # sem esteira conectada
