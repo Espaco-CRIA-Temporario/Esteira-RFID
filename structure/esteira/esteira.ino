@@ -1,42 +1,10 @@
-/*
-  ESTEIRA - Arduino da esteira
-  Motor de passo 28BYJ-48 (ULN2003), 3 sensores HC-SR04, 3 servos.
-
-  Ligações:
-    ULN2003:  IN1=8  IN2=9  IN3=10  IN4=11  (ordem normal)
-    HC-SR04 1 (doca 1): TRIG=A0  ECHO=A1
-    HC-SR04 2 (doca 2): TRIG=A2  ECHO=A3
-    HC-SR04 3 (doca 3): TRIG=A4  ECHO=A5
-    Servo 1=5   Servo 2=6   Servo 3=7
-    LED externo (com resistor 220-330 ohm): pino 13
-    Serial: RX (pino 0) <- TX (pino 1) do leitor
-            TX (pino 1) -> RX (pino 0) do leitor
-            GND comum entre as placas
-    ATENÇÃO: motor e servos devem ter fonte externa de 5 V (GND em comum).
-
-  A doca 1 é a mais perto do leitor, a doca 3 a mais longe.
-
-  Protocolo serial (9600, linhas terminadas em \n):
-    recebe:  RESET        limpa a fila e desliga a esteira
-             CAIXA:n      nova caixa no fim da fila, destino = doca n (1..3)
-    envia:   ERRO         caixa detectada sem destino (o buzzer do leitor apita)
-             # texto      depuração (o leitor ignora)
-
-  Lógica:
-    - A fila guarda o destino de cada caixa, na ordem em que foram cadastradas.
-    - Cada sensor lembra quantas caixas da fila já passaram por ele.
-    - Quando um sensor vê uma caixa: se o destino dela é a doca do sensor, a
-      esteira pausa, o servo bate e volta, e a esteira anda de novo.
-      Se o destino é uma doca mais à frente, a caixa passa direto.
-    - Fila vazia = motor desligado.
-
-  IMPORTANTE: ao fazer upload, desconecte o fio do pino 0 (RX).
-*/
+// ESTEIRA - motor de passo, 3 sensores HC-SR04, 3 servos
+// ULN2003: 8,9,10,11 | Sensores TRIG/ECHO: A0/A1, A2/A3, A4/A5
+// Servos: 5,6,7 | LED: 13
+// Serial cruzada com o leitor + GND comum
+// Upload: desconecte o fio do pino 0
 
 #include <Servo.h>
-
-// ===================== CONFIGURAÇÃO =====================
-const bool DEBUG = false;   // true = imprime mensagens "# ..." na serial
 
 const uint8_t MOTOR_PINOS[4] = {8, 9, 10, 11};
 const uint8_t TRIG_PINOS[3]  = {A0, A2, A4};
@@ -45,27 +13,26 @@ const uint8_t SERVO_PINOS[3] = {5, 6, 7};
 const uint8_t LED_SENSOR = 13;
 
 // Sensores
-const uint8_t DIST_DETECTA_CM = 10;   // objeto a 10 cm ou menos = caixa presente
-const uint8_t DIST_LIBERA_CM  = 14;   // acima disso = caixa saiu (histerese)
-const uint8_t CONFIRMACOES    = 2;    // leituras seguidas para confirmar
-const unsigned long INTERVALO_SENSOR_MS = 20;  // um sensor lido a cada 20 ms
-const unsigned long ECHO_TIMEOUT_US = 2500;    // ~40 cm, evita travar o motor
+const uint8_t DIST_DETECTA_CM = 10;   // caixa presente
+const uint8_t DIST_LIBERA_CM  = 14;   // caixa saiu
+const uint8_t CONFIRMACOES    = 2;
+const unsigned long INTERVALO_SENSOR_MS = 20;
+const unsigned long ECHO_TIMEOUT_US = 2500;
 
-// Servos (ajuste 0/90 se algum servo ficar do lado oposto, ex.: repouso 180 e bate 90)
+// Servos
 const uint8_t ANG_REPOUSO[3] = {0, 0, 0};
 const uint8_t ANG_BATE[3]    = {90, 90, 90};
-const unsigned int TEMPO_ASSENTAR_MS = 150;  // espera a caixa parar antes de bater
-const unsigned int TEMPO_BATIDA_MS   = 250;  // tempo com o servo estendido
+const unsigned int TEMPO_ASSENTAR_MS = 150;
+const unsigned int TEMPO_BATIDA_MS   = 250;
 
-// Motor de passo (passo completo, 2048 passos por volta)
+// Motor (2048 passos por volta)
 const int PASSOS_VOLTA = 2048;
 const uint8_t RPM_MIN = 6;
 const uint8_t RPM_MAX = 17;
-const unsigned int RAMPA_MS = 150;     // +1 RPM a cada 150 ms
-const bool SENTIDO_NORMAL = true;      // false inverte o sentido da esteira
+const unsigned int RAMPA_MS = 150;
+const bool SENTIDO_NORMAL = true;   // false inverte a esteira
 
 const uint8_t MAX_FILA = 20;
-// ========================================================
 
 const uint8_t SEQ[4][4] = {
   {1, 1, 0, 0},
@@ -76,13 +43,12 @@ const uint8_t SEQ[4][4] = {
 
 Servo servos[3];
 
-// fila de caixas (guarda a doca de destino, 1..3)
+// fila de destinos (docas 1..3)
 uint8_t fila[MAX_FILA];
 uint8_t qtd = 0;
-// quantas caixas da fila já passaram por cada sensor
-uint8_t passou[3] = {0, 0, 0};
+uint8_t passou[3] = {0, 0, 0};   // caixas da fila que já passaram por cada sensor
 
-// estado dos sensores
+// sensores
 bool presente[3] = {false, false, false};
 uint8_t contaOn[3]  = {0, 0, 0};
 uint8_t contaOff[3] = {0, 0, 0};
@@ -100,23 +66,6 @@ unsigned long tRampa = 0;
 char linha[24];
 uint8_t posLinha = 0;
 
-// ---------------------- utilidades ----------------------
-void depurar(const __FlashStringHelper* msg, int valor = -1) {
-  if (!DEBUG) return;
-  Serial.print(F("# "));
-  Serial.print(msg);
-  if (valor >= 0) {
-    Serial.print(' ');
-    Serial.print(valor);
-  }
-  Serial.println();
-}
-
-void enviarErro(const __FlashStringHelper* motivo) {
-  Serial.println(F("ERRO"));
-  depurar(motivo);
-}
-
 // ---------------------- motor ----------------------
 void aplicarFase() {
   for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], SEQ[faseMotor][i]);
@@ -125,22 +74,20 @@ void aplicarFase() {
 void ligarMotor() {
   if (motorLigado) return;
   motorLigado = true;
-  rpmAtual = RPM_MIN;            // sempre arranca devagar (rampa)
+  rpmAtual = RPM_MIN;
   tRampa = millis();
   tUltimoPassoUs = micros();
-  depurar(F("motor ligado"));
 }
 
-// só para de dar passos, mantém as bobinas energizadas (segura a esteira)
+// para os passos mas mantém as bobinas energizadas
 void pausarMotor() {
   motorLigado = false;
 }
 
-// para e solta as bobinas (não esquenta)
+// para e solta as bobinas
 void desligarMotor() {
   motorLigado = false;
   for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], LOW);
-  depurar(F("motor desligado"));
 }
 
 void atualizarMotor() {
@@ -166,24 +113,21 @@ void resetar() {
   qtd = 0;
   for (uint8_t s = 0; s < 3; s++) passou[s] = 0;
   desligarMotor();
-  depurar(F("reset"));
 }
 
 void adicionarCaixa(uint8_t doca) {
   if (qtd >= MAX_FILA) {
-    enviarErro(F("fila cheia"));
+    Serial.println(F("ERRO"));
     return;
   }
   fila[qtd++] = doca;
-  depurar(F("caixa na fila, doca"), doca);
   ligarMotor();
 }
 
-// remove a caixa de índice idx, que estava no sensor "sensor" (0..2)
+// remove a caixa idx, que estava no sensor "sensor" (0..2)
 void removerCaixa(uint8_t idx, uint8_t sensor) {
   for (uint8_t k = idx; k + 1 < qtd; k++) fila[k] = fila[k + 1];
   qtd--;
-  // os sensores antes deste já tinham contado essa caixa
   for (uint8_t j = 0; j < sensor; j++) {
     if (passou[j] > 0) passou[j]--;
   }
@@ -195,10 +139,9 @@ void entregar(uint8_t s, uint8_t idx) {
   delay(TEMPO_ASSENTAR_MS);
   servos[s].write(ANG_BATE[s]);
   delay(TEMPO_BATIDA_MS);
-  servos[s].write(ANG_REPOUSO[s]);   // volta e a esteira anda junto
+  servos[s].write(ANG_REPOUSO[s]);
 
   removerCaixa(idx, s);
-  depurar(F("entregue na doca"), s + 1);
 
   if (qtd > 0) ligarMotor();
   else desligarMotor();
@@ -212,16 +155,16 @@ uint16_t lerDistanciaCm(uint8_t s) {
   delayMicroseconds(10);
   digitalWrite(TRIG_PINOS[s], LOW);
   unsigned long duracao = pulseIn(ECHO_PINOS[s], HIGH, ECHO_TIMEOUT_US);
-  if (duracao == 0) return 999;   // nada por perto
+  if (duracao == 0) return 999;
   return duracao / 58;
 }
 
-// um sensor viu uma caixa nova
+// o sensor s viu uma caixa nova
 void tratarDeteccao(uint8_t s) {
   uint8_t idx = passou[s];
 
-  if (idx >= qtd) {
-    enviarErro(F("caixa sem destino no sensor"));
+  if (idx >= qtd) {           // caixa sem destino
+    Serial.println(F("ERRO"));
     return;
   }
 
@@ -231,12 +174,10 @@ void tratarDeteccao(uint8_t s) {
   if (destino == doca) {
     entregar(s, idx);
   } else if (destino > doca) {
-    passou[s]++;                       // passa direto
-    depurar(F("passou direto no sensor"), doca);
-  } else {
-    // devia ter sido entregue antes: tira da fila para não travar a esteira
+    passou[s]++;              // passa direto
+  } else {                    // passou da sua doca
     removerCaixa(idx, s);
-    enviarErro(F("caixa passou da sua doca"));
+    Serial.println(F("ERRO"));
     if (qtd == 0) desligarMotor();
   }
 }
@@ -274,7 +215,6 @@ void processarLinha() {
     uint8_t doca = linha[6] - '0';
     if (doca >= 1 && doca <= 3) adicionarCaixa(doca);
   }
-  // qualquer outra linha (ex.: "# ...") é ignorada
 }
 
 void lerSerial() {
@@ -289,7 +229,7 @@ void lerSerial() {
     } else if (posLinha < sizeof(linha) - 1) {
       linha[posLinha++] = c;
     } else {
-      posLinha = 0;  // linha longa demais: descarta
+      posLinha = 0;
     }
   }
 }
@@ -311,8 +251,6 @@ void setup() {
   }
   pinMode(LED_SENSOR, OUTPUT);
   digitalWrite(LED_SENSOR, LOW);
-
-  depurar(F("esteira pronta"));
 }
 
 void loop() {
