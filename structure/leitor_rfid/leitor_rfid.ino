@@ -1,5 +1,3 @@
-include <SPI.h>
-#include <Adafruit_PN532.h>
 /*
   LEITOR RFID - Arduino do leitor (PN532 em SPI + buzzer)
 
