@@ -18,6 +18,7 @@ const uint8_t DIST_LIBERA_CM  = 14;   // caixa saiu
 const uint8_t CONFIRMACOES    = 2;
 const unsigned long INTERVALO_SENSOR_MS = 20;
 const unsigned long ECHO_TIMEOUT_US = 2500;
+const unsigned long INTERVALO_ERRO_MS = 1000;   // mínimo entre dois ERRO
 
 // Servos
 const uint8_t ANG_REPOUSO[3] = {0, 0, 0};
@@ -62,9 +63,28 @@ uint8_t rpmAtual = RPM_MIN;
 unsigned long tUltimoPassoUs = 0;
 unsigned long tRampa = 0;
 
+// erro
+unsigned long tUltimoErro = 0;
+bool jaTeveErro = false;
+
 // serial
 char linha[24];
 uint8_t posLinha = 0;
+
+// ---------------------- erro ----------------------
+// s = sensor (1..3) que gerou o erro, ou 0 se não veio de sensor
+void enviarErro(uint8_t s) {
+  unsigned long agora = millis();
+  if (jaTeveErro && agora - tUltimoErro < INTERVALO_ERRO_MS) return;
+  jaTeveErro = true;
+  tUltimoErro = agora;
+
+  if (s > 0) {
+    Serial.print(F("# sensor "));
+    Serial.println(s);
+  }
+  Serial.println(F("ERRO"));
+}
 
 // ---------------------- motor ----------------------
 void aplicarFase() {
@@ -117,7 +137,7 @@ void resetar() {
 
 void adicionarCaixa(uint8_t doca) {
   if (qtd >= MAX_FILA) {
-    Serial.println(F("ERRO"));
+    enviarErro(0);
     return;
   }
   fila[qtd++] = doca;
@@ -164,7 +184,7 @@ void tratarDeteccao(uint8_t s) {
   uint8_t idx = passou[s];
 
   if (idx >= qtd) {           // caixa sem destino
-    Serial.println(F("ERRO"));
+    enviarErro(s + 1);
     return;
   }
 
@@ -177,7 +197,7 @@ void tratarDeteccao(uint8_t s) {
     passou[s]++;              // passa direto
   } else {                    // passou da sua doca
     removerCaixa(idx, s);
-    Serial.println(F("ERRO"));
+    enviarErro(s + 1);
     if (qtd == 0) desligarMotor();
   }
 }
