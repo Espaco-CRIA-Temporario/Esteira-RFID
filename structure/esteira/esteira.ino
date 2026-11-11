@@ -18,13 +18,12 @@ const uint8_t DIST_LIBERA_CM  = 14;   // caixa saiu
 const uint8_t CONFIRMACOES    = 2;
 const unsigned long INTERVALO_SENSOR_MS = 20;
 const unsigned long ECHO_TIMEOUT_US = 2500;
-const unsigned long INTERVALO_ERRO_MS = 1000;   // mínimo entre dois ERRO
 
 // Servos
 const uint8_t ANG_REPOUSO[3] = {0, 0, 0};
 const uint8_t ANG_BATE[3]    = {90, 90, 90};
-const unsigned int TEMPO_ASSENTAR_MS = 150;
-const unsigned int TEMPO_BATIDA_MS   = 250;
+const unsigned int TEMPO_ASSENTAR_MS   = 50;    // espera a caixa parar antes de bater
+const unsigned int TEMPO_CHEGAR_90_MS  = 300;   // espera o servo chegar em 90° antes de voltar a 0°
 
 // Motor (2048 passos por volta)
 const int PASSOS_VOLTA = 2048;
@@ -51,6 +50,7 @@ uint8_t passou[3] = {0, 0, 0};   // caixas da fila que já passaram por cada sen
 
 // sensores
 bool presente[3] = {false, false, false};
+bool perto[3]    = {false, false, false};   // leitura direta (para o LED)
 uint8_t contaOn[3]  = {0, 0, 0};
 uint8_t contaOff[3] = {0, 0, 0};
 uint8_t sensorAtual = 0;
@@ -63,28 +63,9 @@ uint8_t rpmAtual = RPM_MIN;
 unsigned long tUltimoPassoUs = 0;
 unsigned long tRampa = 0;
 
-// erro
-unsigned long tUltimoErro = 0;
-bool jaTeveErro = false;
-
 // serial
 char linha[24];
 uint8_t posLinha = 0;
-
-// ---------------------- erro ----------------------
-// s = sensor (1..3) que gerou o erro, ou 0 se não veio de sensor
-void enviarErro(uint8_t s) {
-  unsigned long agora = millis();
-  if (jaTeveErro && agora - tUltimoErro < INTERVALO_ERRO_MS) return;
-  jaTeveErro = true;
-  tUltimoErro = agora;
-
-  if (s > 0) {
-    Serial.print(F("# sensor "));
-    Serial.println(s);
-  }
-  Serial.println(F("ERRO"));
-}
 
 // ---------------------- motor ----------------------
 void aplicarFase() {
@@ -136,10 +117,7 @@ void resetar() {
 }
 
 void adicionarCaixa(uint8_t doca) {
-  if (qtd >= MAX_FILA) {
-    enviarErro(0);
-    return;
-  }
+  if (qtd >= MAX_FILA) return;   // fila cheia: ignora
   fila[qtd++] = doca;
   ligarMotor();
 }
@@ -157,9 +135,10 @@ void removerCaixa(uint8_t idx, uint8_t sensor) {
 void entregar(uint8_t s, uint8_t idx) {
   pausarMotor();
   delay(TEMPO_ASSENTAR_MS);
-  servos[s].write(ANG_BATE[s]);
-  delay(TEMPO_BATIDA_MS);
-  servos[s].write(ANG_REPOUSO[s]);
+
+  servos[s].write(ANG_BATE[s]);        // vai a 90° na velocidade máxima
+  delay(TEMPO_CHEGAR_90_MS);           // espera chegar em 90°
+  servos[s].write(ANG_REPOUSO[s]);     // só então volta a 0°
 
   removerCaixa(idx, s);
 
@@ -183,10 +162,7 @@ uint16_t lerDistanciaCm(uint8_t s) {
 void tratarDeteccao(uint8_t s) {
   uint8_t idx = passou[s];
 
-  if (idx >= qtd) {           // caixa sem destino
-    enviarErro(s + 1);
-    return;
-  }
+  if (idx >= qtd) return;     // caixa sem destino: ignora
 
   uint8_t destino = fila[idx];
   uint8_t doca = s + 1;
@@ -195,15 +171,16 @@ void tratarDeteccao(uint8_t s) {
     entregar(s, idx);
   } else if (destino > doca) {
     passou[s]++;              // passa direto
-  } else {                    // passou da sua doca
+  } else {                    // passou da sua doca: tira da fila
     removerCaixa(idx, s);
-    enviarErro(s + 1);
     if (qtd == 0) desligarMotor();
   }
 }
 
 void atualizarSensor(uint8_t s) {
   uint16_t cm = lerDistanciaCm(s);
+
+  perto[s] = (cm <= DIST_DETECTA_CM);   // LED segue a leitura direta
 
   if (!presente[s]) {
     if (cm <= DIST_DETECTA_CM) {
@@ -282,6 +259,6 @@ void loop() {
     tSensor = agora;
     atualizarSensor(sensorAtual);
     sensorAtual = (sensorAtual + 1) % 3;
-    digitalWrite(LED_SENSOR, (presente[0] || presente[1] || presente[2]) ? HIGH : LOW);
+    digitalWrite(LED_SENSOR, (perto[0] || perto[1] || perto[2]) ? HIGH : LOW);
   }
 }
