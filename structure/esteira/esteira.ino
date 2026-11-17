@@ -1,12 +1,18 @@
-// ESTEIRA - motor de passo, 3 sensores HC-SR04, 3 servos
-// ULN2003: 8,9,10,11 | Sensores TRIG/ECHO: A0/A1, A2/A3, A4/A5
+// ESTEIRA - motor DC amarelo (TT), 3 sensores HC-SR04, 3 servos
+// Driver ponte H (L298N / L9110 / TB6612): IN1=8, IN2=9, ENA (PWM)=11
+// Sensores TRIG/ECHO: A0/A1, A2/A3, A4/A5
 // Servos: 5,6,7 | LED: 13
 // Serial cruzada com o leitor + GND comum
 // Upload: desconecte o fio do pino 0
+//
+// OBS: o pino do PWM do motor precisa ser 3 ou 11 (o Servo.h desativa o PWM dos pinos 9 e 10).
 
 #include <Servo.h>
 
-const uint8_t MOTOR_PINOS[4] = {8, 9, 10, 11};
+const uint8_t MOTOR_IN1 = 8;
+const uint8_t MOTOR_IN2 = 9;
+const uint8_t MOTOR_PWM = 11;
+
 const uint8_t TRIG_PINOS[3]  = {A0, A2, A4};
 const uint8_t ECHO_PINOS[3]  = {A1, A3, A5};
 const uint8_t SERVO_PINOS[3] = {5, 6, 7};
@@ -22,24 +28,17 @@ const unsigned long ECHO_TIMEOUT_US = 2500;
 // Servos
 const uint8_t ANG_REPOUSO[3] = {0, 0, 0};
 const uint8_t ANG_BATE[3]    = {90, 90, 90};
-const unsigned int TEMPO_ASSENTAR_MS   = 50;    // espera a caixa parar antes de bater
+const unsigned int TEMPO_ASSENTAR_MS   = 80;    // espera a caixa parar antes de bater
 const unsigned int TEMPO_CHEGAR_90_MS  = 300;   // espera o servo chegar em 90° antes de voltar a 0°
 
-// Motor (2048 passos por volta)
-const int PASSOS_VOLTA = 2048;
-const uint8_t RPM_MIN = 6;
-const uint8_t RPM_MAX = 17;
-const unsigned int RAMPA_MS = 150;
+// Motor DC (PWM 0..255) - ajuste PWM_MIN/PWM_MAX para a velocidade da esteira
+const uint8_t PWM_MIN = 110;        // abaixo disso o motor amarelo costuma não girar
+const uint8_t PWM_MAX = 180;
+const uint8_t PWM_PASSO = 5;
+const unsigned int RAMPA_MS = 30;
 const bool SENTIDO_NORMAL = true;   // false inverte a esteira
 
 const uint8_t MAX_FILA = 20;
-
-const uint8_t SEQ[4][4] = {
-  {1, 1, 0, 0},
-  {0, 1, 1, 0},
-  {0, 0, 1, 1},
-  {1, 0, 0, 1}
-};
 
 Servo servos[3];
 
@@ -58,9 +57,7 @@ unsigned long tSensor = 0;
 
 // motor
 bool motorLigado = false;
-uint8_t faseMotor = 0;
-uint8_t rpmAtual = RPM_MIN;
-unsigned long tUltimoPassoUs = 0;
+uint8_t pwmAtual = PWM_MIN;
 unsigned long tRampa = 0;
 
 // serial
@@ -68,44 +65,44 @@ char linha[24];
 uint8_t posLinha = 0;
 
 // ---------------------- motor ----------------------
-void aplicarFase() {
-  for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], SEQ[faseMotor][i]);
+void aplicarDirecao() {
+  digitalWrite(MOTOR_IN1, SENTIDO_NORMAL ? HIGH : LOW);
+  digitalWrite(MOTOR_IN2, SENTIDO_NORMAL ? LOW : HIGH);
 }
 
 void ligarMotor() {
   if (motorLigado) return;
   motorLigado = true;
-  rpmAtual = RPM_MIN;
+  pwmAtual = PWM_MIN;
   tRampa = millis();
-  tUltimoPassoUs = micros();
+  aplicarDirecao();
+  analogWrite(MOTOR_PWM, pwmAtual);
 }
 
-// para os passos mas mantém as bobinas energizadas
+// freia o motor (para a esteira na hora, para o servo bater na caixa parada)
 void pausarMotor() {
   motorLigado = false;
+  digitalWrite(MOTOR_IN1, HIGH);
+  digitalWrite(MOTOR_IN2, HIGH);
+  analogWrite(MOTOR_PWM, 255);
 }
 
-// para e solta as bobinas
+// para e solta o motor
 void desligarMotor() {
   motorLigado = false;
-  for (uint8_t i = 0; i < 4; i++) digitalWrite(MOTOR_PINOS[i], LOW);
+  analogWrite(MOTOR_PWM, 0);
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
 }
 
 void atualizarMotor() {
   if (!motorLigado) return;
 
   unsigned long agoraMs = millis();
-  if (rpmAtual < RPM_MAX && agoraMs - tRampa >= RAMPA_MS) {
-    rpmAtual++;
+  if (pwmAtual < PWM_MAX && agoraMs - tRampa >= RAMPA_MS) {
+    pwmAtual = (PWM_MAX - pwmAtual > PWM_PASSO) ? pwmAtual + PWM_PASSO : PWM_MAX;
+    analogWrite(MOTOR_PWM, pwmAtual);
     tRampa = agoraMs;
-  }
-
-  unsigned long intervaloUs = 60000000UL / ((unsigned long)PASSOS_VOLTA * rpmAtual);
-  unsigned long agoraUs = micros();
-  if (agoraUs - tUltimoPassoUs >= intervaloUs) {
-    tUltimoPassoUs = agoraUs;
-    faseMotor = SENTIDO_NORMAL ? ((faseMotor + 1) & 3) : ((faseMotor + 3) & 3);
-    aplicarFase();
   }
 }
 
@@ -138,127 +135,4 @@ void entregar(uint8_t s, uint8_t idx) {
 
   servos[s].write(ANG_BATE[s]);        // vai a 90° na velocidade máxima
   delay(TEMPO_CHEGAR_90_MS);           // espera chegar em 90°
-  servos[s].write(ANG_REPOUSO[s]);     // só então volta a 0°
-
-  removerCaixa(idx, s);
-
-  if (qtd > 0) ligarMotor();
-  else desligarMotor();
-}
-
-// ---------------------- sensores ----------------------
-uint16_t lerDistanciaCm(uint8_t s) {
-  digitalWrite(TRIG_PINOS[s], LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PINOS[s], HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PINOS[s], LOW);
-  unsigned long duracao = pulseIn(ECHO_PINOS[s], HIGH, ECHO_TIMEOUT_US);
-  if (duracao == 0) return 999;
-  return duracao / 58;
-}
-
-// o sensor s viu uma caixa nova
-void tratarDeteccao(uint8_t s) {
-  uint8_t idx = passou[s];
-
-  if (idx >= qtd) return;     // caixa sem destino: ignora
-
-  uint8_t destino = fila[idx];
-  uint8_t doca = s + 1;
-
-  if (destino == doca) {
-    entregar(s, idx);
-  } else if (destino > doca) {
-    passou[s]++;              // passa direto
-  } else {                    // passou da sua doca: tira da fila
-    removerCaixa(idx, s);
-    if (qtd == 0) desligarMotor();
-  }
-}
-
-void atualizarSensor(uint8_t s) {
-  uint16_t cm = lerDistanciaCm(s);
-
-  perto[s] = (cm <= DIST_DETECTA_CM);   // LED segue a leitura direta
-
-  if (!presente[s]) {
-    if (cm <= DIST_DETECTA_CM) {
-      if (++contaOn[s] >= CONFIRMACOES) {
-        contaOn[s] = 0;
-        presente[s] = true;
-        tratarDeteccao(s);
-      }
-    } else {
-      contaOn[s] = 0;
-    }
-  } else {
-    if (cm > DIST_LIBERA_CM) {
-      if (++contaOff[s] >= CONFIRMACOES) {
-        contaOff[s] = 0;
-        presente[s] = false;
-      }
-    } else {
-      contaOff[s] = 0;
-    }
-  }
-}
-
-// ---------------------- serial ----------------------
-void processarLinha() {
-  if (strcmp(linha, "RESET") == 0) {
-    resetar();
-  } else if (strncmp(linha, "CAIXA:", 6) == 0) {
-    uint8_t doca = linha[6] - '0';
-    if (doca >= 1 && doca <= 3) adicionarCaixa(doca);
-  }
-}
-
-void lerSerial() {
-  while (Serial.available()) {
-    char c = Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (posLinha > 0) {
-        linha[posLinha] = 0;
-        processarLinha();
-        posLinha = 0;
-      }
-    } else if (posLinha < sizeof(linha) - 1) {
-      linha[posLinha++] = c;
-    } else {
-      posLinha = 0;
-    }
-  }
-}
-
-// ---------------------- setup / loop ----------------------
-void setup() {
-  Serial.begin(9600);
-
-  for (uint8_t i = 0; i < 4; i++) {
-    pinMode(MOTOR_PINOS[i], OUTPUT);
-    digitalWrite(MOTOR_PINOS[i], LOW);
-  }
-  for (uint8_t s = 0; s < 3; s++) {
-    pinMode(TRIG_PINOS[s], OUTPUT);
-    digitalWrite(TRIG_PINOS[s], LOW);
-    pinMode(ECHO_PINOS[s], INPUT);
-    servos[s].attach(SERVO_PINOS[s]);
-    servos[s].write(ANG_REPOUSO[s]);
-  }
-  pinMode(LED_SENSOR, OUTPUT);
-  digitalWrite(LED_SENSOR, LOW);
-}
-
-void loop() {
-  lerSerial();
-  atualizarMotor();
-
-  unsigned long agora = millis();
-  if (agora - tSensor >= INTERVALO_SENSOR_MS) {
-    tSensor = agora;
-    atualizarSensor(sensorAtual);
-    sensorAtual = (sensorAtual + 1) % 3;
-    digitalWrite(LED_SENSOR, (perto[0] || perto[1] || perto[2]) ? HIGH : LOW);
-  }
-}
+  servos[s].write(ANG_REPOUSO[s]);
