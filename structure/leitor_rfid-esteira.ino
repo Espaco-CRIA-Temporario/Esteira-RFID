@@ -14,7 +14,7 @@ const uint8_t FUNCAO = 1;
 #define BUZZER      8
 #define LED_LEITURA 7
 
-const bool RELE_ATIVO_BAIXO = true;
+const bool RELE_ATIVO_BAIXO = false;
 
 const unsigned long TEMPO_ESTEIRA_MS      = 4000;
 const unsigned long ATRASO_APOS_PARADA_MS = 1000;
