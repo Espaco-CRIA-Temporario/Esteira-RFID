@@ -17,7 +17,7 @@ const uint8_t FUNCAO = 1;
 
 const bool RELE_ATIVO_BAIXO = false;
 
-const unsigned long TEMPO_ESTEIRA_MS      = 4000;
+const unsigned long TEMPO_ESTEIRA_MS      = 3000;
 const unsigned long ATRASO_APOS_PARADA_MS = 1000;
 const unsigned long ATRASO_VALIDO_MS      = 1000;
 const unsigned long ATRASO_ERRO_MS        = 1500;
