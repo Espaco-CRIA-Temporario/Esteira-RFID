@@ -17,12 +17,12 @@ const uint8_t FUNCAO = 1;
 
 const bool RELE_ATIVO_BAIXO = false;
 
-const unsigned long TEMPO_ESTEIRA_MS      = 3000;
+const unsigned long TEMPO_ESTEIRA_MS      = 2600;
 const unsigned long ATRASO_APOS_PARADA_MS = 1000;
 const unsigned long ATRASO_VALIDO_MS      = 1000;
 const unsigned long ATRASO_ERRO_MS        = 1500;
-const unsigned long LED_ACESO_MS          = 500;
-const unsigned long LED_VERMELHO_MS       = 1500;
+const unsigned long LED_ACESO_MS          = 2600;
+const unsigned long LED_VERMELHO_MS       = 1000;
 
 const uint8_t BLOCO = 4;
 const char MARCA[] = "ESTEIRA";
