@@ -1,6 +1,6 @@
-// ESTEIRA COM LEITOR RFID - 1 Arduino
+// ESTEIRA COM LEITOR RFID + RELE JQC3F-5VDC-C - 1 Arduino
 // PN532 (SPI): SCK=13 MISO=12 MOSI=11 SS=10
-// Ponte H: IN1=4 IN2=5 ENA(PWM)=3 | Buzzer=8 | LED=7
+// Rele: IN=3 | Buzzer=8 | LED=7
 // FUNCAO = 0 -> cadastra cartões | FUNCAO = 1 -> opera a esteira
 // Mensagens no Monitor Serial a 9600 baud
 
@@ -10,18 +10,17 @@
 const uint8_t FUNCAO = 1;
 
 #define SS_PIN      10
-#define MOTOR_IN1   4
-#define MOTOR_IN2   5
-#define MOTOR_PWM   3
+#define RELE        3
 #define BUZZER      8
 #define LED_LEITURA 7
+
+const bool RELE_ATIVO_BAIXO = true;
 
 const unsigned long TEMPO_ESTEIRA_MS      = 4000;
 const unsigned long ATRASO_APOS_PARADA_MS = 1000;
 const unsigned long ATRASO_VALIDO_MS      = 1000;
 const unsigned long ATRASO_ERRO_MS        = 1500;
 const unsigned long LED_ACESO_MS          = 500;
-const bool SENTIDO_NORMAL = true;
 
 const uint8_t BLOCO = 4;
 const char MARCA[] = "ESTEIRA";
@@ -78,17 +77,13 @@ void bipeErro()  { iniciarBipes(3, 120, 120); }
 void bipeParou() { iniciarBipes(2, 400, 200); }
 
 void ligarMotor() {
-  digitalWrite(MOTOR_IN1, SENTIDO_NORMAL ? HIGH : LOW);
-  digitalWrite(MOTOR_IN2, SENTIDO_NORMAL ? LOW : HIGH);
-  analogWrite(MOTOR_PWM, 255);
+  digitalWrite(RELE, RELE_ATIVO_BAIXO ? LOW : HIGH);
   motorLigado = true;
   tMotor = millis();
 }
 
 void pararMotor() {
-  digitalWrite(MOTOR_IN1, HIGH);
-  digitalWrite(MOTOR_IN2, HIGH);
-  analogWrite(MOTOR_PWM, 255);
+  digitalWrite(RELE, RELE_ATIVO_BAIXO ? HIGH : LOW);
   motorLigado = false;
 }
 
@@ -169,15 +164,12 @@ void gravar(uint8_t *uid, uint8_t uidLen) {
 
 void setup() {
   Serial.begin(9600);
-  pinMode(MOTOR_IN1, OUTPUT);
-  pinMode(MOTOR_IN2, OUTPUT);
-  pinMode(MOTOR_PWM, OUTPUT);
+
+  digitalWrite(RELE, RELE_ATIVO_BAIXO ? HIGH : LOW);
+  pinMode(RELE, OUTPUT);
   pinMode(BUZZER, OUTPUT);
   pinMode(LED_LEITURA, OUTPUT);
 
-  digitalWrite(MOTOR_IN1, LOW);
-  digitalWrite(MOTOR_IN2, LOW);
-  analogWrite(MOTOR_PWM, 0);
   digitalWrite(BUZZER, LOW);
   digitalWrite(LED_LEITURA, LOW);
 
