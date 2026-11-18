@@ -2,6 +2,7 @@
 // PN532 (SPI): SCK=13 MISO=12 MOSI=11 SS=10
 // Ponte H: IN1=4 IN2=5 ENA(PWM)=3 | Buzzer=8 | LED=7
 // FUNCAO = 0 -> cadastra cartões | FUNCAO = 1 -> opera a esteira
+// Mensagens no Monitor Serial a 9600 baud
 
 #include <SPI.h>
 #include <Adafruit_PN532.h>
@@ -114,9 +115,13 @@ void atualizarLed() {
 
 bool iniciarPN532() {
   nfc.begin();
-  if (!nfc.getFirmwareVersion()) return false;
+  if (!nfc.getFirmwareVersion()) {
+    Serial.println(F("RFID nao encontrado"));
+    return false;
+  }
   nfc.setPassiveActivationRetries(0x02);
   nfc.SAMConfig();
+  Serial.println(F("RFID iniciado"));
   return true;
 }
 
@@ -130,10 +135,12 @@ bool cartaoAutorizado(uint8_t *uid, uint8_t uidLen) {
 
 void operar(uint8_t *uid, uint8_t uidLen) {
   if (!cartaoAutorizado(uid, uidLen)) {
+    Serial.println(F("Cartao nao identificado"));
     bipeErro();
     definirAtraso(ATRASO_ERRO_MS);
     return;
   }
+  Serial.println(F("Cartao identificado"));
   bipeOk();
   ligarMotor();
 }
@@ -149,11 +156,19 @@ void gravar(uint8_t *uid, uint8_t uidLen) {
             && nfc.mifareclassic_ReadDataBlock(BLOCO, conf)
             && memcmp(conf, dados, 16) == 0;
 
-  if (ok) { bipeOk();   definirAtraso(ATRASO_VALIDO_MS); }
-  else    { bipeErro(); definirAtraso(ATRASO_ERRO_MS); }
+  if (ok) {
+    Serial.println(F("Cartao cadastrado"));
+    bipeOk();
+    definirAtraso(ATRASO_VALIDO_MS);
+  } else {
+    Serial.println(F("Falha ao cadastrar o cartao"));
+    bipeErro();
+    definirAtraso(ATRASO_ERRO_MS);
+  }
 }
 
 void setup() {
+  Serial.begin(9600);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
   pinMode(MOTOR_PWM, OUTPUT);
