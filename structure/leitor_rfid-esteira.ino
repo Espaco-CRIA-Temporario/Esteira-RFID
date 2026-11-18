@@ -1,6 +1,6 @@
 // ESTEIRA COM LEITOR RFID + RELE JQC3F-5VDC-C - 1 Arduino
 // PN532 (SPI): SCK=13 MISO=12 MOSI=11 SS=10
-// Rele: IN=3 | Buzzer=8 | LED=7
+// Rele: IN=3 | Buzzer=8 | LED=7 | LED vermelho=9
 // FUNCAO = 0 -> cadastra cartões | FUNCAO = 1 -> opera a esteira
 // Mensagens no Monitor Serial a 9600 baud
 
@@ -9,10 +9,11 @@
 
 const uint8_t FUNCAO = 1;
 
-#define SS_PIN      10
-#define RELE        3
-#define BUZZER      8
-#define LED_LEITURA 7
+#define SS_PIN       10
+#define RELE         3
+#define BUZZER       8
+#define LED_LEITURA  7
+#define LED_VERMELHO 9
 
 const bool RELE_ATIVO_BAIXO = false;
 
@@ -21,6 +22,7 @@ const unsigned long ATRASO_APOS_PARADA_MS = 1000;
 const unsigned long ATRASO_VALIDO_MS      = 1000;
 const unsigned long ATRASO_ERRO_MS        = 1500;
 const unsigned long LED_ACESO_MS          = 500;
+const unsigned long LED_VERMELHO_MS       = 1500;
 
 const uint8_t BLOCO = 4;
 const char MARCA[] = "ESTEIRA";
@@ -41,6 +43,9 @@ unsigned int durBipe = 100, pausaBipe = 100;
 
 bool ledLigado = false;
 unsigned long tLed = 0;
+
+bool ledVermelhoLigado = false;
+unsigned long tLedVermelho = 0;
 
 void definirAtraso(unsigned long ms) {
   tAtraso = millis();
@@ -108,6 +113,19 @@ void atualizarLed() {
   }
 }
 
+void acenderLedVermelho() {
+  digitalWrite(LED_VERMELHO, HIGH);
+  ledVermelhoLigado = true;
+  tLedVermelho = millis();
+}
+
+void atualizarLedVermelho() {
+  if (ledVermelhoLigado && millis() - tLedVermelho >= LED_VERMELHO_MS) {
+    digitalWrite(LED_VERMELHO, LOW);
+    ledVermelhoLigado = false;
+  }
+}
+
 bool iniciarPN532() {
   nfc.begin();
   if (!nfc.getFirmwareVersion()) {
@@ -131,11 +149,12 @@ bool cartaoAutorizado(uint8_t *uid, uint8_t uidLen) {
 void operar(uint8_t *uid, uint8_t uidLen) {
   if (!cartaoAutorizado(uid, uidLen)) {
     Serial.println(F("Cartao nao identificado"));
-    bipeErro();
+    acenderLedVermelho();
     definirAtraso(ATRASO_ERRO_MS);
     return;
   }
   Serial.println(F("Cartao identificado"));
+  acenderLed();
   bipeOk();
   ligarMotor();
 }
@@ -169,9 +188,11 @@ void setup() {
   pinMode(RELE, OUTPUT);
   pinMode(BUZZER, OUTPUT);
   pinMode(LED_LEITURA, OUTPUT);
+  pinMode(LED_VERMELHO, OUTPUT);
 
   digitalWrite(BUZZER, LOW);
   digitalWrite(LED_LEITURA, LOW);
+  digitalWrite(LED_VERMELHO, LOW);
 
   pn532Ok = iniciarPN532();
   if (pn532Ok) bipeOk(); else bipeErro();
@@ -180,6 +201,7 @@ void setup() {
 void loop() {
   atualizarBipes();
   atualizarLed();
+  atualizarLedVermelho();
   atualizarMotor();
 
   if (motorLigado) return;
@@ -201,8 +223,10 @@ void loop() {
   uint8_t uidLen = 0;
   if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLen, 100)) return;
 
-  acenderLed();
-
-  if (FUNCAO == 0) gravar(uid, uidLen);
-  else             operar(uid, uidLen);
+  if (FUNCAO == 0) {
+    acenderLed();
+    gravar(uid, uidLen);
+  } else {
+    operar(uid, uidLen);
+  }
 }
