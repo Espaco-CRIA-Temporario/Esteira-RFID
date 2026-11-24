@@ -3,12 +3,11 @@ Ponte USB entre os Arduinos e o site.
 
   Arduino leitor (leitor_site.ino)  --USB-->  ponte.py  --HTTP-->  site (Flask + banco)
                                                  |
-                                                 +--USB-->  Arduino da esteira (esteira.ino)
+                                                 +--USB-->  Arduino da esteira
 
-Protocolo da esteira (o mesmo do esteira.ino do projeto):
-    RESET       limpa a fila e desliga a esteira (enviado ao iniciar a ponte)
-    CAIXA:n     nova caixa na fila, destino = doca n (1..3)
-    ERRO        (a esteira envia) viu uma caixa sem destino
+O site decide tudo. Quando a leitura exige uma acao da esteira, ele devolve o texto do comando
+(ex.: "RUA:2" ou "DOCA:3") e a ponte so repassa esse texto, linha por linha, para a esteira.
+Para mudar o texto dos comandos edite COMANDO_RUA / COMANDO_DOCA em regras.py.
 
 Uso:
     python ponte.py --listar                      # mostra as portas COM disponiveis
@@ -24,8 +23,7 @@ import requests
 import serial
 from serial.tools import list_ports
 
-BAUD = 9600          # igual nos sketches do leitor e da esteira
-DOCAS_ESTEIRA = 3    # a esteira atual tem 3 docas (sensores + servos)
+BAUD = 9600  # igual nos sketches do leitor e da esteira
 
 
 def listar_portas():
@@ -51,7 +49,7 @@ def enviar(ser, texto):
     ser.write((texto + "\n").encode())
 
 
-def tratar_linha(linha, api, leitor_fixo, ser_leitor, ser_esteira, docas=DOCAS_ESTEIRA):
+def tratar_linha(linha, api, sensor_fixo, ser_leitor, ser_esteira):
     """Processa uma linha vinda do Arduino leitor. Retorna a resposta da API (ou None)."""
     linha = linha.strip()
     if not linha:
@@ -64,8 +62,8 @@ def tratar_linha(linha, api, leitor_fixo, ser_leitor, ser_esteira, docas=DOCAS_E
     print(f"[tag] {uid}")
 
     corpo = {"uid": uid}
-    if leitor_fixo:
-        corpo["leitor"] = leitor_fixo
+    if sensor_fixo:
+        corpo["sensor"] = sensor_fixo
 
     try:
         r = requests.post(f"{api}/api/tag-lida", json=corpo, timeout=3)
@@ -76,47 +74,39 @@ def tratar_linha(linha, api, leitor_fixo, ser_leitor, ser_esteira, docas=DOCAS_E
         return None
 
     print(f"[site] {'OK' if dados.get('ok') else 'ERRO'}: {dados.get('mensagem')}")
-    resposta_ok = bool(dados.get("ok"))
+    enviar(ser_leitor, "OK" if dados.get("ok") else "ERRO")
 
-    if resposta_ok and dados.get("esteira"):
-        rota = dados.get("rota")
-        if not ser_esteira:
-            print("[esteira] (ponte iniciada sem --esteira: nada enviado)")
-        elif rota is None or not (1 <= int(rota) <= docas):
-            print(f"[esteira] destino {rota} nao existe na esteira (ela tem {docas} docas). Nada enviado.")
-            resposta_ok = False
+    comando = dados.get("comando")
+    if dados.get("ok") and comando:
+        if ser_esteira:
+            enviar(ser_esteira, comando)
+            print(f"[esteira] {comando}")
         else:
-            enviar(ser_esteira, f"CAIXA:{int(rota)}")
-            print(f"[esteira] CAIXA:{int(rota)}")
-
-    enviar(ser_leitor, "OK" if resposta_ok else "ERRO")
+            print(f"[esteira] (ponte iniciada sem --esteira: '{comando}' nao foi enviado)")
     return dados
 
 
 def ler_esteira(ser_esteira, ser_leitor):
-    """Mostra o que a esteira enviou. Se ela viu uma caixa sem destino (ERRO), avisa o leitor."""
+    """Mostra o que a esteira enviou. Se ela avisar ERRO, o leitor apita."""
     while ser_esteira.in_waiting:
         linha = ser_esteira.readline().decode(errors="ignore").strip()
         if not linha:
             continue
         print(f"[esteira] {linha}")
         if linha == "ERRO":
-            enviar(ser_leitor, "ERRO")   # o leitor apita
+            enviar(ser_leitor, "ERRO")
 
 
 def teste_manual(ser_esteira):
-    """Digitar 1, 2 ou 3 + Enter manda CAIXA:n para a esteira; 'r' manda RESET."""
+    """Qualquer linha digitada no terminal e enviada como esta para a esteira (ex.: RUA:2)."""
     while True:
         try:
-            cmd = input().strip().lower()
+            texto = input().strip()
         except EOFError:
             return
-        if cmd in ("1", "2", "3"):
-            enviar(ser_esteira, f"CAIXA:{cmd}")
-            print(f"[esteira] CAIXA:{cmd} (teste manual)")
-        elif cmd == "r":
-            enviar(ser_esteira, "RESET")
-            print("[esteira] RESET (teste manual)")
+        if texto:
+            enviar(ser_esteira, texto)
+            print(f"[esteira] {texto} (teste manual)")
 
 
 def main():
@@ -124,10 +114,9 @@ def main():
     ap.add_argument("--listar", action="store_true", help="lista as portas seriais e sai")
     ap.add_argument("--leitor", help="porta do Arduino leitor, ex.: COM3")
     ap.add_argument("--esteira", help="porta do Arduino da esteira, ex.: COM4 (opcional)")
-    ap.add_argument("--docas", type=int, default=DOCAS_ESTEIRA, help="quantas docas a esteira tem (padrao 3)")
     ap.add_argument("--api", default="http://127.0.0.1:5000", help="endereco do site")
-    ap.add_argument("--como", help="forca um leitor do banco (ex.: LEITOR-ENT-1 ou ESTEIRA); "
-                                   "sem isso vale o leitor escolhido no site")
+    ap.add_argument("--sensor", help="forca um sensor do banco (ex.: SENSOR-ESTEIRA-INICIO); "
+                                     "sem isso vale o sensor escolhido no site")
     a = ap.parse_args()
 
     if a.listar:
@@ -138,9 +127,7 @@ def main():
     ser_leitor = abrir(a.leitor, "o leitor")
     ser_esteira = abrir(a.esteira, "a esteira") if a.esteira else None
     if ser_esteira:
-        enviar(ser_esteira, "RESET")   # esteira comeca com a fila vazia
-        print("Esteira: fila limpa (RESET).")
-        print("Teste manual: digite 1, 2 ou 3 + Enter para mandar uma caixa; 'r' + Enter para RESET.")
+        print("Teste manual: digite um comando (ex.: RUA:2 ou DOCA:3) + Enter para enviar a esteira.")
         threading.Thread(target=teste_manual, args=(ser_esteira,), daemon=True).start()
     print("Ponte ativa. Aproxime uma tag. (Ctrl+C para sair)")
 
@@ -148,7 +135,7 @@ def main():
         while True:
             linha = ser_leitor.readline().decode(errors="ignore")
             if linha:
-                tratar_linha(linha, a.api.rstrip("/"), a.como, ser_leitor, ser_esteira, a.docas)
+                tratar_linha(linha, a.api.rstrip("/"), a.sensor, ser_leitor, ser_esteira)
             if ser_esteira:
                 ler_esteira(ser_esteira, ser_leitor)
     except KeyboardInterrupt:

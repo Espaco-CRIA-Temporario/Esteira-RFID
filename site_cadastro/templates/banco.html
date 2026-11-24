@@ -1,16 +1,25 @@
-<!doctype html>
-<html lang="pt-br"><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
-<title>Banco de dados</title></head><body>
-<p><a href="/">&larr; Voltar</a> | Atualiza sozinho a cada 5 segundos | arquivo: {{ arquivo }}</p>
+{% extends "base.html" %}
+{% set pagina = 'banco' %}
+{% block titulo %}Banco{% endblock %}
+
+{% block conteudo %}
 <h1>Banco de dados</h1>
-<p>Tabelas: {% for t in dados %}<a href="#{{ t.nome }}">{{ t.nome }}</a>{% if not loop.last %} | {% endif %}{% endfor %}</p>
+<p class="suave">Somente leitura. Arquivo: <span class="mono">{{ arquivo }}</span>. Para editar os dados use a aba <a href="{{ url_for('cadastros_inicio') }}">Cadastros</a>.</p>
+<p>Tabelas: {% for t in dados %}<a href="#{{ t.nome }}">{{ t.nome }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}</p>
+
+<div id="tabelas-banco" data-auto>
 {% for t in dados %}
-<h2 id="{{ t.nome }}">{{ t.nome }} ({{ t.total }} linhas{% if t.total > t.linhas|length %}, mostrando as {{ t.linhas|length }} mais recentes{% endif %})</h2>
-{% if t.linhas %}
-<table border="1" cellpadding="4">
-<tr>{% for c in t.colunas %}<th>{{ c }}</th>{% endfor %}</tr>
-{% for l in t.linhas %}<tr>{% for v in l %}<td>{{ '' if v is none else v }}</td>{% endfor %}</tr>{% endfor %}
-</table>
-{% else %}<p>(vazia)</p>{% endif %}
+<section class="card">
+  <h2 id="{{ t.nome }}">{{ t.nome }} <span class="suave">({{ t.total }} linhas{% if t.total > t.linhas|length %}, mostrando as {{ t.linhas|length }} mais recentes{% endif %})</span></h2>
+  {% if t.linhas %}
+  <div class="rolagem">
+  <table class="tabela">
+    <tr>{% for c in t.colunas %}<th>{{ c }}</th>{% endfor %}</tr>
+    {% for l in t.linhas %}<tr>{% for v in l %}<td>{{ '' if v is none else v }}</td>{% endfor %}</tr>{% endfor %}
+  </table>
+  </div>
+  {% else %}<p class="vazio">(vazia)</p>{% endif %}
+</section>
 {% endfor %}
-</body></html>
+</div>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set pagina = 'cadastros' %}
+{% block titulo %}{{ cfg.titulo }}{% endblock %}
+
+{# Desenha o campo certo para cada tipo (texto, numero, lista). 'form' liga o campo ao formulario da linha. #}
+{% macro campo(c, valor, form) -%}
+  {%- if c.tipo == 'numero' -%}
+    <input type="number" name="{{ c.coluna }}" value="{{ '' if valor is none else valor }}" form="{{ form }}" {{ 'required' if c.obrigatorio }}>
+  {%- elif c.tipo in ('ref', 'opcoes') -%}
+    <select name="{{ c.coluna }}" form="{{ form }}">
+      {% if not c.obrigatorio %}<option value="">(nenhum)</option>{% endif %}
+      {% for v, nome in opcoes[c.coluna] %}<option value="{{ v }}" {{ 'selected' if valor is not none and valor|string == v|string }}>{{ nome }}</option>{% endfor %}
+    </select>
+  {%- else -%}
+    <input type="text" name="{{ c.coluna }}" value="{{ '' if valor is none else valor }}" form="{{ form }}" {{ 'required' if c.obrigatorio }}>
+  {%- endif -%}
+{%- endmacro %}
+
+{% block conteudo %}
+<h1>Cadastros</h1>
+<p class="suave">Aqui voce edita os dados do banco: tipos de TV, ruas, docas, destinos e sensores.</p>
+
+<nav class="abas">
+  {% for k, c in CADASTROS.items() %}
+  <a href="{{ url_for('cadastro', chave=k) }}" class="{{ 'ativo' if k == chave }}">{{ c.titulo_curto or c.titulo }}</a>
+  {% endfor %}
+</nav>
+
+<section class="card">
+  <h2>{{ cfg.titulo }}</h2>
+  {% if cfg.ajuda %}<p class="suave">{{ cfg.ajuda }}</p>{% endif %}
+  <div class="rolagem">
+  <table class="tabela edicao">
+    <tr>{% for c in cfg.campos %}<th>{{ c.rotulo }}</th>{% endfor %}<th></th></tr>
+
+    {# linha para adicionar um novo #}
+    <tr class="linha-nova">
+      {% for c in cfg.campos %}
+      <td>{% if loop.first %}<form id="f-novo" method="post" action="{{ url_for('cadastro_novo', chave=chave) }}"></form>{% endif %}{{ campo(c, none, 'f-novo') }}</td>
+      {% endfor %}
+      <td><button class="botao" form="f-novo">Adicionar</button></td>
+    </tr>
+
+    {# linhas existentes: cada uma tem seu proprio formulario #}
+    {% for r in linhas %}
+    <tr>
+      {% for c in cfg.campos %}
+      <td>{% if loop.first %}<form id="f{{ r.id }}" method="post" action="{{ url_for('cadastro_salvar', chave=chave, id=r.id) }}"></form>{% endif %}{{ campo(c, r[c.coluna], 'f' ~ r.id) }}</td>
+      {% endfor %}
+      <td class="acoes">
+        <button class="botao" form="f{{ r.id }}">Salvar</button>
+        <button class="botao perigo" form="f{{ r.id }}" formaction="{{ url_for('cadastro_excluir', chave=chave, id=r.id) }}"
+                data-confirmar="Excluir este registro?">Excluir</button>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Painel{% endblock %} - Armazem RFID</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='estilo.css') }}">
+</head>
+<body>
+
+<header class="topo">
+  <div class="container">
+    <a class="logo" href="{{ url_for('painel') }}">Armazem RFID</a>
+    <nav class="menu">
+      {# 'pagina' e definida no topo de cada template filho, para marcar o item ativo #}
+      <a href="{{ url_for('painel') }}"          class="{{ 'ativo' if pagina == 'painel' }}">Painel</a>
+      <a href="{{ url_for('produtos') }}"        class="{{ 'ativo' if pagina == 'produtos' }}">Produtos</a>
+      <a href="{{ url_for('armazem') }}"         class="{{ 'ativo' if pagina == 'armazem' }}">Armazem</a>
+      <a href="{{ url_for('eventos') }}"         class="{{ 'ativo' if pagina == 'eventos' }}">Historico</a>
+      <a href="{{ url_for('cadastros_inicio') }}" class="{{ 'ativo' if pagina == 'cadastros' }}">Cadastros</a>
+      <a href="{{ url_for('ver_banco') }}"       class="{{ 'ativo' if pagina == 'banco' }}">Banco</a>
+    </nav>
+    <span class="leitor-atual" title="O que o leitor fisico esta fazendo agora">
+      Leitor: <b>{{ leitor_atual }}</b>
+    </span>
+  </div>
+</header>
+
+<main class="container">
+  {% with mensagens = get_flashed_messages(with_categories=true) %}
+    {% for categoria, texto in mensagens %}
+      <div class="msg {{ categoria }}">{{ texto }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  {% block conteudo %}{% endblock %}
+</main>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

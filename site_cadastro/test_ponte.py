@@ -1,4 +1,5 @@
-"""Testa a ponte.py sem Arduino: usa portas seriais falsas e o site de verdade (em segundo plano)."""
+"""Testa a ponte.py sem Arduino: usa portas seriais falsas e o site de verdade (em segundo plano).
+Uso:  python test_ponte.py"""
 import os
 import tempfile
 import threading
@@ -9,7 +10,6 @@ import requests  # noqa: E402
 from werkzeug.serving import make_server  # noqa: E402
 
 import app as A  # noqa: E402
-import regras  # noqa: E402
 import ponte  # noqa: E402
 
 srv = make_server("127.0.0.1", 5057, A.app)
@@ -26,6 +26,7 @@ def check(nome, cond):
 
 
 class Fake:
+    """Porta serial falsa: guarda o que a ponte escreve e entrega linhas prontas para ler."""
     def __init__(self, entrada=()):
         self.saida, self.entrada = [], [l.encode() + b"\n" for l in entrada]
 
@@ -40,51 +41,48 @@ class Fake:
         return self.entrada.pop(0) if self.entrada else b""
 
 
-def passo(uid, leitor=None, esteira=True, docas=3):
+def passo(uid, sensor=None, esteira=True):
+    """Simula uma leitura. Retorna (o que o leitor recebeu, o que a esteira recebeu)."""
     L, E = Fake(), Fake()
-    ponte.tratar_linha(f"UID;{uid}", API, leitor, L, E if esteira else None, docas)
+    ponte.tratar_linha(f"UID;{uid}", API, sensor, L, E if esteira else None)
     return L.saida, E.saida
+
+
+def definir_destino(pid, destino_id):
+    requests.post(f"{API}/produtos/{pid}/destino", data={"destino_id": destino_id})
 
 
 check("linha INFO e ignorada", ponte.tratar_linha("INFO;PN532 pronto", API, None, Fake(), Fake()) is None)
 
-# cadastro pela tag
-L, E = passo("04A1B2C3")
-check("cadastro: leitor recebe OK, esteira nada", L == ["OK"] and E == [])
+# cadastro pela tag (sensor ativo = CADASTRO)
+check("cadastro: leitor OK e esteira sem comando", passo("04A1B2C3") == (["OK"], []))
 uid = requests.get(API + "/api/ultima-leitura").json()["uid"]
 check("UID chegou ao site", uid == "04A1B2C3")
-requests.post(API + "/produtos", data={"uid": uid, "tipo_id": 3}, allow_redirects=False)  # TV 55
-check("tag repetida no cadastro da ERRO", passo("04A1B2C3")[0] == ["ERRO"])
+requests.post(API + "/produtos", data={"uid": uid, "tipo_produto_id": 3})   # TV 55 -> RUA 3
+check("tag repetida no cadastro da ERRO", passo("04A1B2C3") == (["ERRO"], []))
 
-# operacao ate a esteira
-check("entrada OK", passo("04A1B2C3", "LEITOR-ENT-1")[0] == ["OK"])
-check("palet certo OK", passo("04A1B2C3", "LEITOR-PP-TV55-B")[0] == ["OK"])
-check("esteira sem destino recusa", passo("04A1B2C3", "ESTEIRA") == (["ERRO"], []))
-requests.post(API + "/produtos/1/destino", data={"destino_id": 2})
-L, E = passo("04A1B2C3", "ESTEIRA")
-check("esteira recebe CAIXA:2 e leitor OK", L == ["OK"] and E == ["CAIXA:2"])
-check("mesma caixa nao entra de novo", passo("04A1B2C3", "ESTEIRA") == (["ERRO"], []))
+# fluxo completo, mandando o sensor
+check("doca de entrada: OK sem comando", passo("04A1B2C3", "SENSOR-DOCA-ENTRADA") == (["OK"], []))
+check("inicio da esteira: esteira recebe RUA:3", passo("04A1B2C3", "SENSOR-ESTEIRA-INICIO") == (["OK"], ["RUA:3"]))
+check("fim da esteira sem destino: ERRO e nada enviado", passo("04A1B2C3", "SENSOR-ESTEIRA-FIM") == (["ERRO"], []))
+definir_destino(1, 2)
+check("fim da esteira: esteira recebe DOCA:2", passo("04A1B2C3", "SENSOR-ESTEIRA-FIM") == (["OK"], ["DOCA:2"]))
+check("doca de saida: OK sem comando", passo("04A1B2C3", "SENSOR-DOCA-SAIDA") == (["OK"], []))
+check("produto expedido nao volta", passo("04A1B2C3", "SENSOR-DOCA-ENTRADA") == (["ERRO"], []))
 
-# destino 4 nao existe na esteira de 3 docas
-requests.post(API + "/produtos", data={"uid": "AA000004", "tipo_id": 1})
-passo("AA000004", "LEITOR-ENT-2"); passo("AA000004", "LEITOR-PP-TV45-A")
-requests.post(API + "/produtos/2/destino", data={"destino_id": 4})
-check("destino 4 com esteira de 3 docas: site recusa e nada e enviado", passo("AA000004", "ESTEIRA") == (["ERRO"], []))
-st = requests.get(API + "/api/produtos").json()[1]["status"]
-check("produto recusado continua com destino definido", st == "DESTINO_DEFINIDO")
-requests.post(API + "/produtos", data={"uid": "AA000005", "tipo_id": 1})
-passo("AA000005", "LEITOR-ENT-2"); passo("AA000005", "LEITOR-PP-TV45-A")
-requests.post(API + "/produtos/3/destino", data={"destino_id": 4})
-regras.ESTEIRA_DOCAS = 4   # simula uma esteira de 4 docas
-check("com docas=4 envia CAIXA:4", passo("AA000005", "ESTEIRA", docas=4) == (["OK"], ["CAIXA:4"]))
+# sem esteira conectada nao quebra
+requests.post(API + "/produtos", data={"uid": "AA000001", "tipo_produto_id": 1})
+passo("AA000001", "SENSOR-DOCA-ENTRADA")
+check("sem --esteira: leitor recebe OK e nada quebra", passo("AA000001", "SENSOR-ESTEIRA-INICIO", esteira=False) == (["OK"], []))
 
-# sem esteira conectada
-requests.post(API + "/produtos", data={"uid": "AA000006", "tipo_id": 1})
-passo("AA000006", "LEITOR-ENT-2"); passo("AA000006", "LEITOR-PP-TV45-A")
-requests.post(API + "/produtos/4/destino", data={"destino_id": 1})
-check("sem --esteira: nao quebra", passo("AA000006", "ESTEIRA", esteira=False)[0] == ["OK"])
+# sensor ativo escolhido no site (a ponte nao manda o sensor)
+requests.post(API + "/produtos", data={"uid": "AA000002", "tipo_produto_id": 4})   # TV 60 -> RUA 4
+requests.post(API + "/sensor-ativo", data={"sensor": "SENSOR-DOCA-ENTRADA"})
+passo("AA000002")
+requests.post(API + "/sensor-ativo", data={"sensor": "SENSOR-ESTEIRA-INICIO"})
+check("sensor ativo do site: esteira recebe RUA:4", passo("AA000002") == (["OK"], ["RUA:4"]))
 
-# mensagens da esteira
+# mensagens vindas da esteira
 L, E = Fake(), Fake(["# debug qualquer", "ERRO"])
 ponte.ler_esteira(E, L)
 check("ERRO da esteira faz o leitor apitar", L.saida == ["ERRO"])

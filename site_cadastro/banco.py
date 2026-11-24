@@ -1,13 +1,28 @@
-"""Banco de dados (SQLite): conexao, criacao das tabelas, dados iniciais e consultas simples."""
+"""Banco de dados (SQLite): conexao, criacao das tabelas e consultas simples.
+
+Para mudar DADOS (tipos, ruas, docas...) use a aba "Cadastros" do site.
+Para mudar a ESTRUTURA edite schema.sql e aumente VERSAO_SCHEMA abaixo.
+"""
 import os
 import sqlite3
+import time
 
 from flask import g
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB = os.environ.get("ARMAZEM_DB", os.path.join(BASE, "armazem.db"))
 
+# Aumente este numero sempre que mudar o schema.sql. Se o banco existente tiver outra
+# versao, ele e guardado como backup (armazem_antigo_DATA.db) e um banco novo e criado.
+VERSAO_SCHEMA = 2
 
+
+def _ler(nome):
+    with open(os.path.join(BASE, nome), encoding="utf-8") as f:
+        return f.read()
+
+
+# ---------------------------------------------------------------- conexao
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB)
@@ -27,52 +42,42 @@ def init_app(app):
     app.teardown_appcontext(fechar_db)
 
 
-def seed(db):
-    for pol in (45, 50, 55, 60):
-        db.execute("INSERT INTO tipos_produto(descricao, polegadas) VALUES (?,?)", (f"TV {pol}", pol))
-    for n in range(1, 5):
-        db.execute("INSERT INTO destinos(nome, rota_esteira) VALUES (?,?)", (f"Destino {n}", n))
-    for n in range(1, 5):
-        db.execute("INSERT INTO docas(codigo, tipo) VALUES (?, 'ENTRADA')", (f"ENT-{n}",))
-    for n in range(1, 5):
-        db.execute("INSERT INTO docas(codigo, tipo, destino_id) VALUES (?, 'SAIDA', ?)", (f"SAI-{n}", n))
-    for t in db.execute("SELECT id, polegadas FROM tipos_produto").fetchall():
-        for letra in ("A", "B"):
-            db.execute(
-                "INSERT INTO porta_palets(codigo, tipo_produto_id) VALUES (?,?)",
-                (f"PP-TV{t['polegadas']}-{letra}", t["id"]),
-            )
-    for d in db.execute("SELECT id, codigo, tipo FROM docas").fetchall():
-        local = "DOCA_ENTRADA" if d["tipo"] == "ENTRADA" else "DOCA_SAIDA"
-        db.execute(
-            "INSERT INTO leitores(codigo, local, doca_id) VALUES (?,?,?)",
-            (f"LEITOR-{d['codigo']}", local, d["id"]),
-        )
-    for p in db.execute("SELECT id, codigo FROM porta_palets").fetchall():
-        db.execute(
-            "INSERT INTO leitores(codigo, local, palet_id) VALUES (?, 'PALET', ?)",
-            (f"LEITOR-{p['codigo']}", p["id"]),
-        )
-
-
-def init_db():
-    db = sqlite3.connect(DB)
-    db.row_factory = sqlite3.Row
-    with open(os.path.join(BASE, "schema.sql"), encoding="utf-8") as f:
-        db.executescript(f.read())
-    if db.execute("SELECT COUNT(*) FROM tipos_produto").fetchone()[0] == 0:
-        seed(db)
+# ---------------------------------------------------------------- criacao
+def criar_banco(caminho):
+    """Cria um banco novo (estrutura + dados iniciais) no arquivo indicado."""
+    db = sqlite3.connect(caminho)
+    db.executescript(_ler("schema.sql"))
+    db.executescript(_ler("dados_iniciais.sql"))
+    db.execute(f"PRAGMA user_version = {VERSAO_SCHEMA}")
     db.commit()
     db.close()
 
 
+def init_db(caminho=None):
+    """Garante um banco pronto. Retorna o caminho do backup, se o banco antigo foi guardado."""
+    caminho = caminho or DB
+    backup = None
+    if os.path.exists(caminho) and os.path.getsize(caminho) > 0:
+        con = sqlite3.connect(caminho)
+        versao = con.execute("PRAGMA user_version").fetchone()[0]
+        con.close()
+        if versao == VERSAO_SCHEMA:
+            return None
+        backup = os.path.join(os.path.dirname(caminho), "armazem_antigo_" + time.strftime("%Y%m%d-%H%M%S") + ".db")
+        os.replace(caminho, backup)
+    criar_banco(caminho)
+    return backup
+
+
+# ---------------------------------------------------------------- consultas
 def normalizar_uid(uid):
     return (uid or "").strip().upper().replace(" ", "")
 
 
-def leitor_ativo(db):
-    """O que o leitor fisico esta fazendo agora: 'CADASTRO', 'ESTEIRA' ou o codigo de um leitor."""
-    return db.execute("SELECT valor FROM config WHERE chave='leitor_ativo'").fetchone()[0]
+def sensor_ativo(db):
+    """O que o leitor fisico esta fazendo agora: 'CADASTRO' ou o codigo de um sensor."""
+    r = db.execute("SELECT valor FROM config WHERE chave='sensor_ativo'").fetchone()
+    return r[0] if r else "CADASTRO"
 
 
 def tabelas(db):

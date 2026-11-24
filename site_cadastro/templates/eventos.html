@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% set pagina = 'eventos' %}
+{% from "_macros.html" import tabela_eventos %}
+{% block titulo %}Historico{% endblock %}
+
+{% block conteudo %}
+<h1>Historico de leituras</h1>
+<section class="card">
+  <p class="suave">As 100 leituras mais recentes. Atualiza sozinho.</p>
+  <div id="historico" data-auto>{{ tabela_eventos(eventos) }}</div>
+</section>
+{% endblock %}

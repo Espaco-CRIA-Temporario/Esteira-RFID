@@ -1,0 +1,167 @@
+/* ============================================================================
+   VISUAL DO SITE  -  tudo que da para mudar sem mexer no HTML esta aqui.
+   Dica: para trocar as cores do site inteiro, edite so o bloco ":root" logo abaixo.
+   ============================================================================ */
+
+:root {
+  /* ---- CORES ---- */
+  --cor-fundo:          #f3f5f8;   /* fundo da pagina */
+  --cor-card:           #ffffff;   /* fundo dos cartoes e tabelas */
+  --cor-texto:          #1f2933;
+  --cor-texto-suave:    #667085;
+  --cor-borda:          #d8dee6;
+  --cor-principal:      #1d5fd1;   /* menu, botoes, links */
+  --cor-principal-hover:#164aa3;
+  --cor-topo:           #14213d;   /* faixa do topo */
+  --cor-ok:             #1b8a4b;
+  --cor-erro:           #c0392b;
+
+  /* ---- COR DE CADA STATUS DO PRODUTO ---- */
+  --st-cadastrado:       #667085;
+  --st-na_doca:          #b7791f;
+  --st-na_rua:           #1d5fd1;
+  --st-destino_definido: #7c3aed;
+  --st-na_esteira:       #0e7490;
+  --st-expedido:         #1b8a4b;
+
+  /* ---- TEXTO E MEDIDAS ---- */
+  --fonte:         system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --fonte-codigo:  ui-monospace, Consolas, "Courier New", monospace;
+  --tamanho-fonte: 15px;
+  --raio:          8px;       /* arredondamento dos cantos */
+  --espaco:        16px;      /* espaco entre blocos */
+  --largura-max:   1100px;    /* largura maxima do conteudo */
+}
+
+/* ---------------------------------------------------------------- base */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--fonte);
+  font-size: var(--tamanho-fonte);
+  color: var(--cor-texto);
+  background: var(--cor-fundo);
+  line-height: 1.45;
+}
+
+h1 { font-size: 1.6rem; margin: 0 0 var(--espaco); }
+h2 { font-size: 1.15rem; margin: 0 0 8px; }
+h3 { font-size: 1rem;    margin: 0 0 6px; }
+p  { margin: 0 0 10px; }
+a  { color: var(--cor-principal); }
+
+.container { max-width: var(--largura-max); margin: 0 auto; padding: 0 var(--espaco); }
+main.container { padding-top: 20px; padding-bottom: 40px; }
+
+.suave { color: var(--cor-texto-suave); }
+#visao > h2 { margin: 24px 0 10px; }          /* titulos soltos da pagina Armazem */
+.card > div + p { margin-top: 12px; }              /* link logo abaixo de uma tabela */
+.mono  { font-family: var(--fonte-codigo); overflow-wrap: anywhere; }
+.vazio { color: var(--cor-texto-suave); font-style: italic; }
+
+/* ---------------------------------------------------------------- topo e menu */
+.topo { background: var(--cor-topo); color: #fff; }
+.topo .container { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; min-height: 54px; }
+.logo { color: #fff; font-weight: 700; font-size: 1.1rem; text-decoration: none; }
+.menu { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
+.menu a { color: #cbd5e1; text-decoration: none; padding: 8px 12px; border-radius: var(--raio); }
+.menu a:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.menu a.ativo { background: var(--cor-principal); color: #fff; }
+.leitor-atual { font-size: .85rem; color: #cbd5e1; }
+
+/* ---------------------------------------------------------------- cartoes */
+.card {
+  background: var(--cor-card);
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  padding: var(--espaco);
+  margin-bottom: var(--espaco);
+}
+.grade       { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--espaco); }
+.grade-ruas  { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--espaco); }
+.grade .card, .grade-ruas .card { margin-bottom: 0; }
+.grade { margin-bottom: var(--espaco); }
+.qtd-rua { font-size: 1.3rem; font-weight: 700; }
+.lista { list-style: none; padding: 0; margin: 0; }
+.lista li { padding: 4px 0; border-top: 1px solid var(--cor-borda); font-size: .9rem; }
+
+/* ---------------------------------------------------------------- avisos */
+.msg { padding: 10px 14px; border-radius: var(--raio); margin-bottom: var(--espaco); border: 1px solid; }
+.msg.ok   { background: #e8f6ee; border-color: var(--cor-ok);   color: #14532d; }
+.msg.erro { background: #fdecea; border-color: var(--cor-erro); color: #7a1d14; }
+.texto-ok   { color: var(--cor-ok);   font-weight: 700; }
+.texto-erro { color: var(--cor-erro); font-weight: 700; }
+
+/* ---------------------------------------------------------------- tabelas */
+.rolagem { overflow-x: auto; }
+.tabela { width: 100%; border-collapse: collapse; background: var(--cor-card); }
+.tabela th, .tabela td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--cor-borda); vertical-align: middle; }
+.tabela th { font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: var(--cor-texto-suave); }
+.tabela tr.linha-erro td { background: #fff5f4; }
+.tabela tr.linha-nova td { background: #f0f6ff; }
+.tabela.edicao input, .tabela.edicao select { width: 100%; min-width: 90px; }
+.acoes { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- formularios e botoes */
+input, select {
+  font: inherit;
+  padding: 7px 10px;
+  border: 1px solid var(--cor-borda);
+  border-radius: var(--raio);
+  background: #fff;
+  color: var(--cor-texto);
+}
+input, select { max-width: 100%; }   /* campos nunca passam da largura do cartao */
+input:focus, select:focus { outline: 2px solid var(--cor-principal); outline-offset: 0; }
+
+.botao {
+  font: inherit;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: var(--raio);
+  background: var(--cor-principal);
+  color: #fff;
+  cursor: pointer;
+}
+.botao:hover { background: var(--cor-principal-hover); }
+.botao.perigo { background: var(--cor-erro); }
+.botao.perigo:hover { background: #962d22; }
+
+.linha-form  { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.coluna-form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.coluna-form select { max-width: 100%; }
+
+.abas { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: var(--espaco); }
+.abas a { padding: 7px 14px; border: 1px solid var(--cor-borda); border-radius: var(--raio); background: var(--cor-card); text-decoration: none; }
+.abas a.ativo { background: var(--cor-principal); border-color: var(--cor-principal); color: #fff; }
+
+/* ---------------------------------------------------------------- status (etiquetas e fluxo) */
+.st-cadastrado       { --cor-status: var(--st-cadastrado); }
+.st-na_doca          { --cor-status: var(--st-na_doca); }
+.st-na_rua           { --cor-status: var(--st-na_rua); }
+.st-destino_definido { --cor-status: var(--st-destino_definido); }
+.st-na_esteira       { --cor-status: var(--st-na_esteira); }
+.st-expedido         { --cor-status: var(--st-expedido); }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--cor-status);
+  color: var(--cor-status);
+  font-size: .8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fluxo { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.etapa {
+  border: 1px solid var(--cor-status);
+  border-top: 5px solid var(--cor-status);
+  border-radius: var(--raio);
+  padding: 10px;
+  text-align: center;
+}
+.etapa .qtd  { display: block; font-size: 1.8rem; font-weight: 700; color: var(--cor-status); }
+.etapa .nome { font-size: .85rem; color: var(--cor-texto-suave); }

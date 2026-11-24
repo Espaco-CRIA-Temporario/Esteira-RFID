@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% set pagina = 'painel' %}
+{% from "_macros.html" import tabela_eventos %}
+{% block titulo %}Painel{% endblock %}
+
+{% block conteudo %}
+<h1>Painel</h1>
+
+{# Quantos produtos estao em cada etapa (atualiza sozinho) #}
+<section class="card">
+  <h2>Fluxo dos produtos</h2>
+  <div class="fluxo" id="fluxo" data-auto>
+    {% for codigo, nome, qtd in fluxo %}
+      <div class="etapa st-{{ codigo|lower }}"><span class="qtd">{{ qtd }}</span><span class="nome">{{ nome }}</span></div>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="grade">
+  <section class="card">
+    <h2>Leitor fisico</h2>
+    <p class="suave">Escolha o que o leitor RFID esta fazendo agora. Em <b>CADASTRO</b> ele so captura o UID para
+       preencher o cadastro; nos outros ele age como aquele sensor do armazem.</p>
+    <form method="post" action="{{ url_for('trocar_sensor_ativo') }}" class="linha-form">
+      <select name="sensor">
+        <option value="CADASTRO" {{ 'selected' if leitor_atual == 'CADASTRO' }}>CADASTRO (so captura o UID)</option>
+        {% for s in sensores %}
+        <option value="{{ s.codigo }}" {{ 'selected' if leitor_atual == s.codigo }}>{{ s.codigo }} - {{ LOCAIS[s.local] }}</option>
+        {% endfor %}
+      </select>
+      <button class="botao">Trocar</button>
+    </form>
+    <p>Ultima tag lida no cadastro: <b class="mono" id="ultima-uid">{{ ultima.tag_uid if ultima else '(nenhuma)' }}</b></p>
+  </section>
+
+  <section class="card">
+    <h2>Simular uma leitura</h2>
+    <p class="suave">Para testar sem Arduino: escolha o produto e o sensor que "leu" a tag.</p>
+    <form method="post" action="{{ url_for('simular') }}" class="coluna-form">
+      <select name="uid" required>
+        {% for p in produtos %}<option value="{{ p.tag_uid }}">{{ p.tag_uid }} - {{ p.tipo }} ({{ rotulo_status(p.status) }})</option>
+        {% else %}<option value="">(cadastre um produto primeiro)</option>{% endfor %}
+      </select>
+      <select name="sensor">
+        {% for s in sensores %}<option value="{{ s.codigo }}">{{ s.codigo }} - {{ LOCAIS[s.local] }}</option>{% endfor %}
+      </select>
+      <button class="botao">Ler tag</button>
+    </form>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Ultimas leituras</h2>
+  <div id="eventos-recentes" data-auto>{{ tabela_eventos(eventos) }}</div>
+  <p><a href="{{ url_for('eventos') }}">Ver historico completo</a></p>
+</section>
+{% endblock %}

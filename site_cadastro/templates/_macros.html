@@ -1,0 +1,26 @@
+{# Pecas reutilizaveis das paginas #}
+
+{# Etiqueta colorida do status (as cores ficam em static/estilo.css) #}
+{% macro badge(codigo) -%}
+<span class="badge st-{{ codigo|lower }}">{{ rotulo_status(codigo) }}</span>
+{%- endmacro %}
+
+{# Tabela do historico de leituras #}
+{% macro tabela_eventos(lista) %}
+<div class="rolagem">
+<table class="tabela">
+  <tr><th>Data / hora</th><th>UID</th><th>Sensor</th><th>Resultado</th><th>Comando</th></tr>
+  {% for e in lista %}
+  <tr class="{{ '' if e.sucesso else 'linha-erro' }}">
+    <td>{{ e.data_hora }}</td>
+    <td class="mono">{{ e.tag_uid }}</td>
+    <td>{{ e.sensor or '-' }}</td>
+    <td><span class="{{ 'texto-ok' if e.sucesso else 'texto-erro' }}">{{ 'OK' if e.sucesso else 'ERRO' }}</span> {{ e.resultado }}</td>
+    <td class="mono">{{ e.comando or '' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="vazio">Nenhuma leitura ainda.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endmacro %}

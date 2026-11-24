@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set pagina = 'armazem' %}
+{% from "_macros.html" import badge %}
+{% block titulo %}Armazem{% endblock %}
+
+{% block conteudo %}
+<h1>Armazem</h1>
+
+<div id="visao" data-auto>
+  <section class="card">
+    <h2>Em transito</h2>
+    <p>Na doca de entrada: <b>{{ transito.get('NA_DOCA', 0) }}</b> &nbsp;|&nbsp;
+       Na esteira, saindo: <b>{{ transito.get('NA_ESTEIRA', 0) }}</b></p>
+  </section>
+
+  <h2>Ruas</h2>
+  <div class="grade-ruas">
+    {% for item in ruas %}
+    <section class="card rua">
+      <h3>{{ item.rua.codigo }} <span class="suave">(esteira: RUA:{{ item.rua.numero }})</span></h3>
+      <p><b>{{ item.rua.tipo }}</b> &middot; {{ item.rua.porta_pallets }} porta-pallets</p>
+      <p class="qtd-rua">{{ item.produtos|length }} produto{{ '' if item.produtos|length == 1 else 's' }}</p>
+      <ul class="lista">
+        {% for p in item.produtos %}
+        <li><span class="mono">{{ p.tag_uid }}</span> {{ badge(p.status) }}{% if p.destino %} &rarr; {{ p.destino }}{% endif %}</li>
+        {% else %}<li class="vazio">Vazia</li>{% endfor %}
+      </ul>
+    </section>
+    {% endfor %}
+  </div>
+
+  <h2>Docas</h2>
+  <section class="card rolagem">
+    <table class="tabela">
+      <tr><th>Doca</th><th>Numero (esteira)</th><th>Destinos que saem por ela</th><th>Saindo agora</th><th>Ja expedidos</th></tr>
+      {% for d in docas %}
+      <tr><td>{{ d.codigo }}</td><td>DOCA:{{ d.numero }}</td><td>{{ d.destinos or '-' }}</td><td>{{ d.saindo }}</td><td>{{ d.expedidos }}</td></tr>
+      {% endfor %}
+    </table>
+  </section>
+</div>
+{% endblock %}

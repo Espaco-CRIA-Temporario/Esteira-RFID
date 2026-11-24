@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% set pagina = 'produtos' %}
+{% from "_macros.html" import badge %}
+{% block titulo %}Produtos{% endblock %}
+
+{% block conteudo %}
+<h1>Produtos</h1>
+
+<section class="card">
+  <h2>Cadastrar produto</h2>
+  <p class="suave">Aproxime a tag do leitor (com o Leitor em CADASTRO) ou digite o UID.
+     Ultima tag lida: <b class="mono" id="ultima-uid">{{ ultima.tag_uid if ultima else '(nenhuma)' }}</b></p>
+  <form method="post" action="{{ url_for('produto_novo') }}" class="linha-form">
+    <input id="campo-uid" name="uid" required placeholder="UID da tag, ex.: 04A1B2C3" data-seq="{{ ultima.seq if ultima else 0 }}" autocomplete="off">
+    <select name="tipo_produto_id">
+      {% for t in tipos %}<option value="{{ t.id }}">{{ t.nome }}</option>{% endfor %}
+    </select>
+    <button class="botao">Cadastrar</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Lista de produtos</h2>
+  <p class="suave">O destino so pode ser definido depois que o produto chegar na rua.</p>
+  <div id="tabela-produtos" data-auto>
+  <div class="rolagem">
+  <table class="tabela">
+    <tr><th>ID</th><th>UID</th><th>Tipo</th><th>Status</th><th>Rua</th><th>Destino</th><th>Definir destino</th></tr>
+    {% for p in produtos %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td class="mono">{{ p.tag_uid }}</td>
+      <td>{{ p.tipo }}</td>
+      <td>{{ badge(p.status) }}</td>
+      <td>{{ p.rua or '-' }}</td>
+      <td>{{ p.destino or '-' }}</td>
+      <td>
+        {% if p.status in pode_definir %}
+        <form method="post" action="{{ url_for('produto_destino', produto_id=p.id) }}" class="linha-form">
+          <select name="destino_id">
+            {% for d in destinos %}<option value="{{ d.id }}" {{ 'selected' if d.id == p.destino_id }}>{{ d.nome }}</option>{% endfor %}
+          </select>
+          <button class="botao">Salvar</button>
+        </form>
+        {% else %}<span class="suave">{{ 'aguardando chegar na rua' if p.status in ('CADASTRADO','NA_DOCA') else '-' }}</span>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="vazio">Nenhum produto cadastrado.</td></tr>
+    {% endfor %}
+  </table>
+  </div>
+  </div>
+</section>
+{% endblock %}
